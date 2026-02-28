@@ -6,12 +6,15 @@ using Spectre.Console;
 
 // ── Parse CLI args ─────────────────────────────────────────────────────────────
 string? cliDir = null;
+string? cliTargetDir = null;
 int? cliPort = null;
 
 for (int i = 0; i < args.Length; i++)
 {
     if ((args[i] == "--dir" || args[i] == "-d") && i + 1 < args.Length)
         cliDir = args[++i];
+    else if ((args[i] == "--target" || args[i] == "-t") && i + 1 < args.Length)
+        cliTargetDir = args[++i];
     else if ((args[i] == "--port" || args[i] == "-p") && i + 1 < args.Length)
         cliPort = int.TryParse(args[++i], out var p) ? p : null;
 }
@@ -22,12 +25,24 @@ AnsiConsole.MarkupLine("[grey]Instant LAN file server[/]\n");
 
 // ── Interactive prompts (skip if CLI args provided) ───────────────────────────
 string serveDir = cliDir ?? AnsiConsole.Ask<string>(
-    "[bold]Directory to serve[/] [grey][[press Enter for current]][/]:",
+    "[bold]Source directory[/] [grey][[press Enter for current]][/]:",
     Directory.GetCurrentDirectory());
 
 if (!Directory.Exists(serveDir))
 {
     AnsiConsole.MarkupLine($"[red]Directory not found:[/] {serveDir}");
+    return 1;
+}
+
+// Target directory: where uploads are saved (defaults to source dir if not specified).
+// When a separate target is given, users only see source files; uploads are private.
+string uploadDir = cliTargetDir ?? AnsiConsole.Ask<string>(
+    "[bold]Upload target directory[/] [grey][[press Enter for same as source]][/]:",
+    serveDir);
+
+if (!Directory.Exists(uploadDir))
+{
+    AnsiConsole.MarkupLine($"[red]Upload target directory not found:[/] {uploadDir}");
     return 1;
 }
 
@@ -43,9 +58,13 @@ var ips = NetworkInterface.GetAllNetworkInterfaces()
     .ToList();
 
 // ── Info panel ─────────────────────────────────────────────────────────────────
+bool separateTarget = !string.Equals(
+    Path.GetFullPath(serveDir), Path.GetFullPath(uploadDir), StringComparison.OrdinalIgnoreCase);
+
 var panel = new Panel(
     Align.Left(new Markup(
-        $"[bold]Serving:[/]  {serveDir}\n" +
+        $"[bold]Source:[/]   {serveDir}\n" +
+        (separateTarget ? $"[bold]Uploads:[/]  {uploadDir}\n" : "") +
         string.Join("\n", ips.Select(ip => $"[bold]URL:[/]      [link]http://{ip}:{port}[/]")) +
         (ips.Count == 0 ? $"\n[bold]URL:[/]      http://localhost:{port}" : ""))))
 {
@@ -76,7 +95,7 @@ var app = builder.Build();
 
 // Wire up FileWatcher and route handlers
 using var fileWatcher = new FileWatcher(serveDir);
-var handlers = new RouteHandlers(serveDir, fileWatcher);
+var handlers = new RouteHandlers(serveDir, uploadDir, fileWatcher);
 
 // ── Console request log ────────────────────────────────────────────────────────
 // Must be registered before route mappings so it wraps endpoint execution.

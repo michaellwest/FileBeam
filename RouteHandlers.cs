@@ -58,7 +58,7 @@ public sealed class FileWatcher : IDisposable
     public void Dispose() => _watcher.Dispose();
 }
 
-public class RouteHandlers(string rootDir, FileWatcher watcher)
+public class RouteHandlers(string rootDir, string uploadDir, FileWatcher watcher)
 {
     private string SafeResolvePath(string? subpath)
     {
@@ -70,6 +70,24 @@ public class RouteHandlers(string rootDir, FileWatcher watcher)
 
         // Prevent path traversal
         if (!combined.StartsWith(rootDir, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Path traversal not allowed.");
+
+        return combined;
+    }
+
+    /// <summary>
+    /// Resolves an upload path relative to <see cref="uploadDir"/>.
+    /// When uploadDir differs from rootDir, uploaded files land in a private
+    /// directory that is never exposed through the browse/download routes.
+    /// </summary>
+    private string SafeResolveUploadPath(string? subpath)
+    {
+        if (string.IsNullOrEmpty(subpath))
+            return uploadDir;
+
+        var combined = Path.GetFullPath(Path.Combine(uploadDir, subpath));
+
+        if (!combined.StartsWith(uploadDir, StringComparison.OrdinalIgnoreCase))
             throw new UnauthorizedAccessException("Path traversal not allowed.");
 
         return combined;
@@ -125,12 +143,15 @@ public class RouteHandlers(string rootDir, FileWatcher watcher)
     // POST /upload/{**subpath}
     public async Task<IResult> UploadFiles(HttpContext ctx, string? subpath)
     {
+        // Uploads always go to uploadDir (which may differ from the browse rootDir).
+        // This keeps uploaded files private when a separate target is configured.
         string resolved;
-        try { resolved = SafeResolvePath(subpath); }
+        try { resolved = SafeResolveUploadPath(subpath); }
         catch { return Results.Forbid(); }
 
+        // Create the target subdirectory if it doesn't exist yet (mirrors source structure).
         if (!Directory.Exists(resolved))
-            return Results.NotFound("Directory not found.");
+            Directory.CreateDirectory(resolved);
 
         var form = await ctx.Request.ReadFormAsync();
         if (form.Files.Count == 0)
