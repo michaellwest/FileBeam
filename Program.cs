@@ -165,6 +165,8 @@ app.MapGet("/",                     handlers.ListDirectory);
 app.MapGet("/browse/{**subpath}",   handlers.BrowseDirectory);
 app.MapGet("/download/{**subpath}", handlers.DownloadFile);
 app.MapPost("/upload/{**subpath}",  handlers.UploadFiles);
+app.MapPost("/delete/{**subpath}",  handlers.DeleteFile);
+app.MapPost("/rename/{**subpath}",  handlers.RenameFile);
 app.MapGet("/events",               handlers.FileEvents);
 
 await app.RunAsync();

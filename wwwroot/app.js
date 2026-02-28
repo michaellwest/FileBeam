@@ -46,6 +46,27 @@ form.addEventListener('submit', e => {
   xhr.send(new FormData(form));
 });
 
+// ── File actions (delete / rename) ───────────────────────────────────────────
+function fbDelete(url, name) {
+  if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+  const f = document.createElement('form');
+  f.method = 'post'; f.action = url;
+  document.body.appendChild(f);
+  f.submit();
+}
+
+function fbRename(url, currentName) {
+  const newName = prompt('Rename to:', currentName);
+  if (!newName || newName === currentName) return;
+  const f = document.createElement('form');
+  f.method = 'post'; f.action = url;
+  const inp = document.createElement('input');
+  inp.type = 'hidden'; inp.name = 'newname'; inp.value = newName;
+  f.appendChild(inp);
+  document.body.appendChild(f);
+  f.submit();
+}
+
 // ── Live reload via Server-Sent Events ────────────────────────────────────────
 (function connectSSE() {
   const es = new EventSource('/events');

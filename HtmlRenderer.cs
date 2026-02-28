@@ -64,7 +64,7 @@ public static class HtmlRenderer
                 : "/browse/" + string.Join("/", segments[..^1].Select(Uri.EscapeDataString));
             sb.AppendLine($"""
                     <tr>
-                      <td colspan="3"><a href="{parentPath}" class="name"><span class="icon">📁</span> ..</a></td>
+                      <td colspan="4"><a href="{parentPath}" class="name"><span class="icon">📁</span> ..</a></td>
                     </tr>
                 """);
         }
@@ -80,6 +80,7 @@ public static class HtmlRenderer
                       <td><a href="{href}" class="name"><span class="icon">📁</span>{name}/</a></td>
                       <td class="size">—</td>
                       <td class="modified">{modif}</td>
+                      <td class="actions"></td>
                     </tr>
                 """);
         }
@@ -87,22 +88,29 @@ public static class HtmlRenderer
         // Files
         foreach (var file in files)
         {
-            var href  = "/download/" + UrlPath(segments, file.Name);
-            var name  = HttpUtility.HtmlEncode(file.Name);
-            var size  = FormatSize(file.Length);
-            var modif = file.LastWriteTime.ToString("yyyy-MM-dd HH:mm");
-            var icon  = FileIcon(file.Extension);
+            var href      = "/download/" + UrlPath(segments, file.Name);
+            var deleteUrl = "/delete/"   + UrlPath(segments, file.Name);
+            var renameUrl = "/rename/"   + UrlPath(segments, file.Name);
+            var name      = HttpUtility.HtmlEncode(file.Name);
+            var nameJs    = HttpUtility.JavaScriptStringEncode(file.Name);
+            var size      = FormatSize(file.Length);
+            var modif     = file.LastWriteTime.ToString("yyyy-MM-dd HH:mm");
+            var icon      = FileIcon(file.Extension);
             sb.AppendLine($"""
                     <tr>
                       <td><a href="{href}" class="name"><span class="icon">{icon}</span>{name}</a></td>
                       <td class="size">{size}</td>
                       <td class="modified">{modif}</td>
+                      <td class="actions">
+                        <button class="act-btn" title="Rename" onclick="fbRename('{renameUrl}','{nameJs}')">✏️</button>
+                        <button class="act-btn" title="Delete" onclick="fbDelete('{deleteUrl}','{name}')">🗑️</button>
+                      </td>
                     </tr>
                 """);
         }
 
         if (dirs.Count == 0 && files.Count == 0)
-            sb.AppendLine("""    <tr><td colspan="3" class="empty">This folder is empty.</td></tr>""");
+            sb.AppendLine("""    <tr><td colspan="4" class="empty">This folder is empty.</td></tr>""");
 
         return sb.ToString();
     }
