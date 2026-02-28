@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "FileBeam": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:21942;http://localhost:21943"
+    }
+  }
+}
