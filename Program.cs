@@ -1,12 +1,15 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Text;
 using FileBeam;
 using Spectre.Console;
 
 // ── Parse CLI args ─────────────────────────────────────────────────────────────
 string? cliDir = null;
 string? cliTargetDir = null;
+string? cliPassword = null;
 int? cliPort = null;
 
 for (int i = 0; i < args.Length; i++)
@@ -17,6 +20,8 @@ for (int i = 0; i < args.Length; i++)
         cliTargetDir = args[++i];
     else if ((args[i] == "--port" || args[i] == "-p") && i + 1 < args.Length)
         cliPort = int.TryParse(args[++i], out var p) ? p : null;
+    else if ((args[i] == "--password" || args[i] == "--pw") && i + 1 < args.Length)
+        cliPassword = args[++i];
 }
 
 // ── Banner ─────────────────────────────────────────────────────────────────────
@@ -48,6 +53,8 @@ if (!Directory.Exists(uploadDir))
 
 int port = cliPort ?? AnsiConsole.Ask("[bold]Port[/]:", 8080);
 
+string? password = cliPassword;
+
 // ── Resolve LAN IPs ────────────────────────────────────────────────────────────
 var ips = NetworkInterface.GetAllNetworkInterfaces()
     .Where(n => n.OperationalStatus == OperationalStatus.Up
@@ -65,6 +72,7 @@ var panel = new Panel(
     Align.Left(new Markup(
         $"[bold]Source:[/]   {serveDir}\n" +
         (separateTarget ? $"[bold]Uploads:[/]  {uploadDir}\n" : "") +
+        (!string.IsNullOrEmpty(password) ? "[bold]Auth:[/]     Password required\n" : "") +
         string.Join("\n", ips.Select(ip => $"[bold]URL:[/]      [link]http://{ip}:{port}[/]")) +
         (ips.Count == 0 ? $"\n[bold]URL:[/]      http://localhost:{port}" : ""))))
 {
@@ -97,7 +105,7 @@ var app = builder.Build();
 using var fileWatcher = new FileWatcher(serveDir);
 var handlers = new RouteHandlers(serveDir, uploadDir, fileWatcher);
 
-// ── Console request log ────────────────────────────────────────────────────────
+// ── Console request log (with elapsed time) ──────────────────────────────────
 // Must be registered before route mappings so it wraps endpoint execution.
 // Registering it after MapGet/MapPost in WebApplication places it after the
 // endpoint middleware, causing it to call next() on an already-started response
@@ -105,7 +113,9 @@ var handlers = new RouteHandlers(serveDir, uploadDir, fileWatcher);
 // UseDeveloperExceptionPage masks the error).
 app.Use(async (ctx, next) =>
 {
+    var sw = Stopwatch.StartNew();
     await next();
+    sw.Stop();
 
     // Suppress noisy SSE keepalive log entries
     if (ctx.Request.Path == "/events") return;
@@ -117,8 +127,35 @@ app.Use(async (ctx, next) =>
     var color  = status >= 400 ? "red" : status >= 300 ? "yellow" : "green";
     var time   = DateTime.Now.ToString("HH:mm:ss");
     AnsiConsole.MarkupLine(
-        $"[grey]{time}[/]  [{color}]{status}[/]  [bold]{method,-6}[/] {Markup.Escape(path)}  [grey]{ip}[/]");
+        $"[grey]{time}[/]  [{color}]{status}[/]  [bold]{method,-6}[/] {Markup.Escape(path)}  [grey]{ip}  {sw.ElapsedMilliseconds}ms[/]");
 });
+
+// ── Basic Auth (optional) ─────────────────────────────────────────────────────
+if (!string.IsNullOrEmpty(password))
+{
+    app.Use(async (ctx, next) =>
+    {
+        var header = ctx.Request.Headers.Authorization.ToString();
+        if (header.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(header[6..]));
+                var colon   = decoded.IndexOf(':');
+                // Accept any username; only the password is checked.
+                if (colon >= 0 && decoded[(colon + 1)..] == password)
+                {
+                    await next();
+                    return;
+                }
+            }
+            catch { /* malformed Base64 — fall through to 401 */ }
+        }
+
+        ctx.Response.Headers.WWWAuthenticate = "Basic realm=\"FileBeam\"";
+        ctx.Response.StatusCode = 401;
+    });
+}
 
 app.MapGet("/",                     handlers.ListDirectory);
 app.MapGet("/browse/{**subpath}",   handlers.BrowseDirectory);
