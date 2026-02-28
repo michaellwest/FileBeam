@@ -38,6 +38,9 @@ public static class HtmlRenderer
                   <input type="file" name="files" multiple id="file-input">
                 </div>
                 <div id="file-list"></div>
+                <div id="progress-wrap" class="progress-wrap" hidden>
+                  <div id="progress-bar" class="progress-bar"></div>
+                </div>
                 <button type="submit" class="btn">Upload</button>
               </form>
             </div>

@@ -1,7 +1,10 @@
 // ── Upload drop-zone ──────────────────────────────────────────────────────────
-const dz   = document.getElementById('drop-zone');
-const inp  = document.getElementById('file-input');
-const list = document.getElementById('file-list');
+const dz       = document.getElementById('drop-zone');
+const inp      = document.getElementById('file-input');
+const list     = document.getElementById('file-list');
+const form     = document.getElementById('upload-form');
+const progWrap = document.getElementById('progress-wrap');
+const progBar  = document.getElementById('progress-bar');
 
 function updateList(files) {
   list.textContent = [...files].map(f => f.name).join(', ');
@@ -16,6 +19,31 @@ dz.addEventListener('drop', e => {
   dz.classList.remove('dragover');
   inp.files = e.dataTransfer.files;
   updateList(inp.files);
+  form.requestSubmit(); // auto-submit immediately after drop
+});
+
+// ── XHR upload with progress bar ─────────────────────────────────────────────
+form.addEventListener('submit', e => {
+  e.preventDefault();
+  if (inp.files.length === 0) return;
+
+  const xhr = new XMLHttpRequest();
+  progWrap.hidden = false;
+  progBar.style.width = '0%';
+
+  xhr.upload.addEventListener('progress', ev => {
+    if (!ev.lengthComputable) return;
+    progBar.style.width = Math.round((ev.loaded / ev.total) * 100) + '%';
+  });
+
+  xhr.addEventListener('load', () => window.location.reload());
+  xhr.addEventListener('error', () => {
+    progWrap.hidden = true;
+    alert('Upload failed. Please try again.');
+  });
+
+  xhr.open('POST', form.action);
+  xhr.send(new FormData(form));
 });
 
 // ── Live reload via Server-Sent Events ────────────────────────────────────────
