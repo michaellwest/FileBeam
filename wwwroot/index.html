@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FileBeam — /{{PAGE_TITLE}}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f1117;
+      color: #e0e0e0;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+    a { color: #5ba4f5; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    header h1 { font-size: 1.4rem; font-weight: 700; color: #5ba4f5; }
+    .breadcrumb {
+      font-size: 0.9rem;
+      color: #888;
+      margin-bottom: 1.5rem;
+      word-break: break-all;
+    }
+    .breadcrumb a { color: #aaa; }
+    .breadcrumb span { color: #e0e0e0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #1a1d27;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    thead tr { background: #222536; }
+    th {
+      text-align: left;
+      padding: 0.75rem 1rem;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #888;
+      font-weight: 600;
+    }
+    td { padding: 0.65rem 1rem; font-size: 0.9rem; border-top: 1px solid #252836; }
+    tr:hover td { background: #20233a; }
+    .icon { width: 1.2em; display: inline-block; }
+    .name { display: flex; align-items: center; gap: 0.5rem; }
+    .size, .modified { color: #888; font-size: 0.82rem; white-space: nowrap; }
+    .empty { text-align: center; padding: 3rem; color: #555; }
+    .upload-section {
+      margin-top: 2rem;
+      background: #1a1d27;
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+    }
+    .upload-section h2 { font-size: 0.95rem; color: #888; margin-bottom: 1rem; }
+    .drop-zone {
+      border: 2px dashed #333;
+      border-radius: 6px;
+      padding: 2rem;
+      text-align: center;
+      color: #555;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      position: relative;
+    }
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: #5ba4f5;
+      background: #1e2235;
+      color: #aaa;
+    }
+    .drop-zone input[type=file] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%;
+    }
+    .drop-zone .hint { font-size: 0.85rem; margin-top: 0.4rem; }
+    .btn {
+      display: inline-block;
+      margin-top: 1rem;
+      padding: 0.55rem 1.25rem;
+      background: #5ba4f5;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .btn:hover { background: #3d8fe0; }
+    #file-list { margin-top: 0.75rem; font-size: 0.82rem; color: #aaa; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>⚡ FileBeam</h1>
+</header>
+<div class="breadcrumb">{{BREADCRUMB}}</div>
+<table>
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Size</th>
+      <th>Modified</th>
+    </tr>
+  </thead>
+  <tbody>
+{{ROWS}}
+  </tbody>
+</table>
+
+<div class="upload-section">
+  <h2>Upload files to this folder</h2>
+  <form id="upload-form" method="post" action="{{UPLOAD_ACTION}}" enctype="multipart/form-data">
+    <div class="drop-zone" id="drop-zone">
+      <div>Click or drag &amp; drop files here</div>
+      <div class="hint">Multiple files supported</div>
+      <input type="file" name="files" multiple id="file-input">
+    </div>
+    <div id="file-list"></div>
+    <button type="submit" class="btn">Upload</button>
+  </form>
+</div>
+
+<script>
+{{APP_JS}}
+</script>
+</body>
+</html>

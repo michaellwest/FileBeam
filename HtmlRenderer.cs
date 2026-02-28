@@ -1,0 +1,137 @@
+using System.Text;
+using System.Web;
+
+namespace FileBeam;
+
+public static class HtmlRenderer
+{
+    public static string RenderDirectory(
+        string relPath,
+        List<DirectoryInfo> dirs,
+        List<FileInfo> files)
+    {
+        var segments     = relPath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+        var uploadAction = segments.Length == 0
+            ? "/upload/"
+            : "/upload/" + string.Join("/", segments.Select(Uri.EscapeDataString));
+
+        return ResourceLoader.Template
+            .Replace("{{PAGE_TITLE}}",     HttpUtility.HtmlEncode(relPath))
+            .Replace("{{BREADCRUMB}}",     BuildBreadcrumb(segments))
+            .Replace("{{ROWS}}",           BuildRows(segments, dirs, files))
+            .Replace("{{UPLOAD_ACTION}}", uploadAction)
+            .Replace("{{APP_JS}}",         ResourceLoader.AppJs);
+    }
+
+    // ── Row builders ──────────────────────────────────────────────────────────
+
+    private static string BuildRows(
+        string[] segments,
+        List<DirectoryInfo> dirs,
+        List<FileInfo> files)
+    {
+        var sb = new StringBuilder();
+
+        // Parent directory link
+        if (segments.Length > 0)
+        {
+            var parentPath = segments.Length == 1
+                ? "/"
+                : "/browse/" + string.Join("/", segments[..^1].Select(Uri.EscapeDataString));
+            sb.AppendLine($"""
+                    <tr>
+                      <td colspan="3"><a href="{parentPath}" class="name"><span class="icon">📁</span> ..</a></td>
+                    </tr>
+                """);
+        }
+
+        // Subdirectories
+        foreach (var dir in dirs)
+        {
+            var href  = "/browse/" + UrlPath(segments, dir.Name);
+            var name  = HttpUtility.HtmlEncode(dir.Name);
+            var modif = dir.LastWriteTime.ToString("yyyy-MM-dd HH:mm");
+            sb.AppendLine($"""
+                    <tr>
+                      <td><a href="{href}" class="name"><span class="icon">📁</span>{name}/</a></td>
+                      <td class="size">—</td>
+                      <td class="modified">{modif}</td>
+                    </tr>
+                """);
+        }
+
+        // Files
+        foreach (var file in files)
+        {
+            var href  = "/download/" + UrlPath(segments, file.Name);
+            var name  = HttpUtility.HtmlEncode(file.Name);
+            var size  = FormatSize(file.Length);
+            var modif = file.LastWriteTime.ToString("yyyy-MM-dd HH:mm");
+            var icon  = FileIcon(file.Extension);
+            sb.AppendLine($"""
+                    <tr>
+                      <td><a href="{href}" class="name"><span class="icon">{icon}</span>{name}</a></td>
+                      <td class="size">{size}</td>
+                      <td class="modified">{modif}</td>
+                    </tr>
+                """);
+        }
+
+        if (dirs.Count == 0 && files.Count == 0)
+            sb.AppendLine("""    <tr><td colspan="3" class="empty">This folder is empty.</td></tr>""");
+
+        return sb.ToString();
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static string BuildBreadcrumb(string[] segments)
+    {
+        var sb = new StringBuilder();
+        sb.Append("<a href=\"/\">root</a>");
+        for (int i = 0; i < segments.Length; i++)
+        {
+            sb.Append(" / ");
+            if (i == segments.Length - 1)
+                sb.Append($"<span>{HttpUtility.HtmlEncode(segments[i])}</span>");
+            else
+            {
+                var href = "/browse/" + string.Join("/", segments[..(i + 1)].Select(Uri.EscapeDataString));
+                sb.Append($"<a href=\"{href}\">{HttpUtility.HtmlEncode(segments[i])}</a>");
+            }
+        }
+        return sb.ToString();
+    }
+
+    private static string UrlPath(string[] segments, string name)
+    {
+        var parts = segments.Length == 0
+            ? new[] { name }
+            : segments.Append(name).ToArray();
+        return string.Join("/", parts.Select(Uri.EscapeDataString));
+    }
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        < 1024               => $"{bytes} B",
+        < 1024 * 1024        => $"{bytes / 1024.0:F1} KB",
+        < 1024 * 1024 * 1024 => $"{bytes / 1024.0 / 1024:F1} MB",
+        _                    => $"{bytes / 1024.0 / 1024 / 1024:F2} GB"
+    };
+
+    private static string FileIcon(string ext) => ext.ToLowerInvariant() switch
+    {
+        ".zip" or ".7z" or ".rar" or ".tar" or ".gz"      => "🗜️",
+        ".pdf"                                              => "📄",
+        ".doc" or ".docx"                                  => "📝",
+        ".xls" or ".xlsx"                                  => "📊",
+        ".ppt" or ".pptx"                                  => "📑",
+        ".mp4" or ".mkv" or ".avi" or ".mov"               => "🎬",
+        ".mp3" or ".wav" or ".flac" or ".aac"              => "🎵",
+        ".jpg" or ".jpeg" or ".png" or ".gif" or ".webp"   => "🖼️",
+        ".exe" or ".msi"                                   => "⚙️",
+        ".txt" or ".md" or ".log"                          => "📃",
+        ".cs" or ".py" or ".js" or ".ts" or ".json"        => "💻",
+        _                                                  => "📦"
+    };
+}
