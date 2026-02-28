@@ -153,6 +153,55 @@ public class RouteHandlers(string rootDir, FileWatcher watcher)
         return Results.Redirect(browseUrl);
     }
 
+    // POST /delete/{**subpath}
+    public IResult DeleteFile(string? subpath)
+    {
+        if (string.IsNullOrEmpty(subpath))
+            return Results.BadRequest("No file specified.");
+
+        string resolved;
+        try { resolved = SafeResolvePath(subpath); }
+        catch { return Results.Forbid(); }
+
+        if (!File.Exists(resolved))
+            return Results.NotFound("File not found.");
+
+        File.Delete(resolved);
+
+        var parentSubpath = Path.GetDirectoryName(subpath)?.Replace('\\', '/');
+        var browseUrl = string.IsNullOrEmpty(parentSubpath) ? "/" : $"/browse/{parentSubpath}";
+        return Results.Redirect(browseUrl);
+    }
+
+    // POST /rename/{**subpath}
+    public async Task<IResult> RenameFile(HttpContext ctx, string? subpath)
+    {
+        if (string.IsNullOrEmpty(subpath))
+            return Results.BadRequest("No file specified.");
+
+        string resolved;
+        try { resolved = SafeResolvePath(subpath); }
+        catch { return Results.Forbid(); }
+
+        if (!File.Exists(resolved))
+            return Results.NotFound("File not found.");
+
+        var form    = await ctx.Request.ReadFormAsync();
+        var newName = Path.GetFileName(form["newname"].ToString());
+        if (string.IsNullOrWhiteSpace(newName))
+            return Results.BadRequest("No new name provided.");
+
+        var newPath = Path.Combine(Path.GetDirectoryName(resolved)!, newName);
+        if (File.Exists(newPath))
+            return Results.Conflict("A file with that name already exists.");
+
+        File.Move(resolved, newPath);
+
+        var parentSubpath = Path.GetDirectoryName(subpath)?.Replace('\\', '/');
+        var browseUrl = string.IsNullOrEmpty(parentSubpath) ? "/" : $"/browse/{parentSubpath}";
+        return Results.Redirect(browseUrl);
+    }
+
     // GET /events  — Server-Sent Events stream for live reload
     public async Task FileEvents(HttpContext ctx)
     {

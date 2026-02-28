@@ -93,6 +93,19 @@
     }
     .btn:hover { background: #3d8fe0; }
     #file-list { margin-top: 0.75rem; font-size: 0.82rem; color: #aaa; }
+    .actions { text-align: right; white-space: nowrap; }
+    .act-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.9rem;
+      padding: 0.1rem 0.3rem;
+      border-radius: 3px;
+      opacity: 0.4;
+      transition: opacity 0.15s;
+    }
+    tr:hover .act-btn { opacity: 1; }
+    .act-btn:hover { background: #252836; }
   </style>
 </head>
 <body>
@@ -106,6 +119,7 @@
       <th>Name</th>
       <th>Size</th>
       <th>Modified</th>
+      <th></th>
     </tr>
   </thead>
   <tbody>
