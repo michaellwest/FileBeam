@@ -7,12 +7,15 @@
     <RootNamespace>FileBeam</RootNamespace>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <PublishSingleFile>true</PublishSingleFile>
-    <SelfContained>true</SelfContained>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-    <PublishReadyToRun>false</PublishReadyToRun>
+    <!--
+      Publish settings are intentionally omitted here so the project builds
+      on any platform without modification.  Use the per-platform publish
+      profiles in Properties/PublishProfiles/ to produce standalone binaries:
+
+        dotnet publish -p:PublishProfile=win-x64
+        dotnet publish -p:PublishProfile=linux-x64
+        dotnet publish -p:PublishProfile=osx-arm64
+    -->
   </PropertyGroup>
 
   <ItemGroup>
