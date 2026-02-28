@@ -113,18 +113,7 @@
   </tbody>
 </table>
 
-<div class="upload-section">
-  <h2>Upload files to this folder</h2>
-  <form id="upload-form" method="post" action="{{UPLOAD_ACTION}}" enctype="multipart/form-data">
-    <div class="drop-zone" id="drop-zone">
-      <div>Click or drag &amp; drop files here</div>
-      <div class="hint">Multiple files supported</div>
-      <input type="file" name="files" multiple id="file-input">
-    </div>
-    <div id="file-list"></div>
-    <button type="submit" class="btn">Upload</button>
-  </form>
-</div>
+{{UPLOAD_SECTION}}
 
 <script>
 {{APP_JS}}

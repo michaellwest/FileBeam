@@ -11,6 +11,7 @@ string? cliDir = null;
 string? cliTargetDir = null;
 string? cliPassword = null;
 int? cliPort = null;
+bool readOnly = false;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -22,6 +23,8 @@ for (int i = 0; i < args.Length; i++)
         cliPort = int.TryParse(args[++i], out var p) ? p : null;
     else if ((args[i] == "--password" || args[i] == "--pw") && i + 1 < args.Length)
         cliPassword = args[++i];
+    else if (args[i] == "--readonly" || args[i] == "-r")
+        readOnly = true;
 }
 
 // ── Banner ─────────────────────────────────────────────────────────────────────
@@ -72,6 +75,7 @@ var panel = new Panel(
     Align.Left(new Markup(
         $"[bold]Source:[/]   {serveDir}\n" +
         (separateTarget ? $"[bold]Uploads:[/]  {uploadDir}\n" : "") +
+        (readOnly ? "[bold yellow]Mode:[/]     Read-only (uploads disabled)\n" : "") +
         (!string.IsNullOrEmpty(password) ? "[bold]Auth:[/]     Password required\n" : "") +
         string.Join("\n", ips.Select(ip => $"[bold]URL:[/]      [link]http://{ip}:{port}[/]")) +
         (ips.Count == 0 ? $"\n[bold]URL:[/]      http://localhost:{port}" : ""))))
@@ -103,7 +107,7 @@ var app = builder.Build();
 
 // Wire up FileWatcher and route handlers
 using var fileWatcher = new FileWatcher(serveDir);
-var handlers = new RouteHandlers(serveDir, uploadDir, fileWatcher);
+var handlers = new RouteHandlers(serveDir, uploadDir, fileWatcher, readOnly);
 
 // ── Console request log (with elapsed time) ──────────────────────────────────
 // Must be registered before route mappings so it wraps endpoint execution.
