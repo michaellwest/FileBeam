@@ -7,6 +7,7 @@ using Spectre.Console;
 // ── Parse CLI args ─────────────────────────────────────────────────────────────
 string? cliDir = null;
 int? cliPort = null;
+bool readOnly = false;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -14,6 +15,8 @@ for (int i = 0; i < args.Length; i++)
         cliDir = args[++i];
     else if ((args[i] == "--port" || args[i] == "-p") && i + 1 < args.Length)
         cliPort = int.TryParse(args[++i], out var p) ? p : null;
+    else if (args[i] == "--readonly" || args[i] == "-r")
+        readOnly = true;
 }
 
 // ── Banner ─────────────────────────────────────────────────────────────────────
@@ -46,6 +49,7 @@ var ips = NetworkInterface.GetAllNetworkInterfaces()
 var panel = new Panel(
     Align.Left(new Markup(
         $"[bold]Serving:[/]  {serveDir}\n" +
+        (readOnly ? "[bold yellow]Mode:[/]     Read-only (uploads disabled)\n" : "") +
         string.Join("\n", ips.Select(ip => $"[bold]URL:[/]      [link]http://{ip}:{port}[/]")) +
         (ips.Count == 0 ? $"\n[bold]URL:[/]      http://localhost:{port}" : ""))))
 {
@@ -76,7 +80,7 @@ var app = builder.Build();
 
 // Wire up FileWatcher and route handlers
 using var fileWatcher = new FileWatcher(serveDir);
-var handlers = new RouteHandlers(serveDir, fileWatcher);
+var handlers = new RouteHandlers(serveDir, fileWatcher, readOnly);
 
 app.MapGet("/",                     handlers.ListDirectory);
 app.MapGet("/browse/{**subpath}",   handlers.BrowseDirectory);

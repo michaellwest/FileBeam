@@ -58,7 +58,7 @@ public sealed class FileWatcher : IDisposable
     public void Dispose() => _watcher.Dispose();
 }
 
-public class RouteHandlers(string rootDir, FileWatcher watcher)
+public class RouteHandlers(string rootDir, FileWatcher watcher, bool isReadOnly = false)
 {
     private string SafeResolvePath(string? subpath)
     {
@@ -98,7 +98,7 @@ public class RouteHandlers(string rootDir, FileWatcher watcher)
         var dirs  = Directory.GetDirectories(resolved).Select(d => new DirectoryInfo(d)).OrderBy(d => d.Name).ToList();
         var files = Directory.GetFiles(resolved).Select(f => new FileInfo(f)).OrderBy(f => f.Name).ToList();
 
-        var html = HtmlRenderer.RenderDirectory(relPath, dirs, files);
+        var html = HtmlRenderer.RenderDirectory(relPath, dirs, files, isReadOnly);
         return Results.Content(html, "text/html");
     }
 
@@ -125,6 +125,9 @@ public class RouteHandlers(string rootDir, FileWatcher watcher)
     // POST /upload/{**subpath}
     public async Task<IResult> UploadFiles(HttpContext ctx, string? subpath)
     {
+        if (isReadOnly)
+            return Results.StatusCode(StatusCodes.Status405MethodNotAllowed);
+
         string resolved;
         try { resolved = SafeResolvePath(subpath); }
         catch { return Results.Forbid(); }

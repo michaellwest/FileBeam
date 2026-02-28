@@ -8,19 +8,40 @@ public static class HtmlRenderer
     public static string RenderDirectory(
         string relPath,
         List<DirectoryInfo> dirs,
-        List<FileInfo> files)
+        List<FileInfo> files,
+        bool isReadOnly = false)
     {
-        var segments     = relPath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+        var segments      = relPath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+        var uploadSection = isReadOnly ? "" : BuildUploadSection(segments);
+
+        return ResourceLoader.Template
+            .Replace("{{PAGE_TITLE}}",      HttpUtility.HtmlEncode(relPath))
+            .Replace("{{BREADCRUMB}}",      BuildBreadcrumb(segments))
+            .Replace("{{ROWS}}",            BuildRows(segments, dirs, files))
+            .Replace("{{UPLOAD_SECTION}}", uploadSection)
+            .Replace("{{APP_JS}}",          ResourceLoader.AppJs);
+    }
+
+    private static string BuildUploadSection(string[] segments)
+    {
         var uploadAction = segments.Length == 0
             ? "/upload/"
             : "/upload/" + string.Join("/", segments.Select(Uri.EscapeDataString));
 
-        return ResourceLoader.Template
-            .Replace("{{PAGE_TITLE}}",     HttpUtility.HtmlEncode(relPath))
-            .Replace("{{BREADCRUMB}}",     BuildBreadcrumb(segments))
-            .Replace("{{ROWS}}",           BuildRows(segments, dirs, files))
-            .Replace("{{UPLOAD_ACTION}}", uploadAction)
-            .Replace("{{APP_JS}}",         ResourceLoader.AppJs);
+        return $"""
+            <div class="upload-section">
+              <h2>Upload files to this folder</h2>
+              <form id="upload-form" method="post" action="{uploadAction}" enctype="multipart/form-data">
+                <div class="drop-zone" id="drop-zone">
+                  <div>Click or drag &amp; drop files here</div>
+                  <div class="hint">Multiple files supported</div>
+                  <input type="file" name="files" multiple id="file-input">
+                </div>
+                <div id="file-list"></div>
+                <button type="submit" class="btn">Upload</button>
+              </form>
+            </div>
+            """;
     }
 
     // ── Row builders ──────────────────────────────────────────────────────────
