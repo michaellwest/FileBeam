@@ -78,13 +78,12 @@ var app = builder.Build();
 using var fileWatcher = new FileWatcher(serveDir);
 var handlers = new RouteHandlers(serveDir, fileWatcher);
 
-app.MapGet("/",                     handlers.ListDirectory);
-app.MapGet("/browse/{**subpath}",   handlers.BrowseDirectory);
-app.MapGet("/download/{**subpath}", handlers.DownloadFile);
-app.MapPost("/upload/{**subpath}",  handlers.UploadFiles);
-app.MapGet("/events",               handlers.FileEvents);
-
 // ── Console request log ────────────────────────────────────────────────────────
+// Must be registered before route mappings so it wraps endpoint execution.
+// Registering it after MapGet/MapPost in WebApplication places it after the
+// endpoint middleware, causing it to call next() on an already-started response
+// which throws in Production (works in Development only because
+// UseDeveloperExceptionPage masks the error).
 app.Use(async (ctx, next) =>
 {
     await next();
@@ -101,6 +100,12 @@ app.Use(async (ctx, next) =>
     AnsiConsole.MarkupLine(
         $"[grey]{time}[/]  [{color}]{status}[/]  [bold]{method,-6}[/] {Markup.Escape(path)}  [grey]{ip}[/]");
 });
+
+app.MapGet("/",                     handlers.ListDirectory);
+app.MapGet("/browse/{**subpath}",   handlers.BrowseDirectory);
+app.MapGet("/download/{**subpath}", handlers.DownloadFile);
+app.MapPost("/upload/{**subpath}",  handlers.UploadFiles);
+app.MapGet("/events",               handlers.FileEvents);
 
 await app.RunAsync();
 return 0;
