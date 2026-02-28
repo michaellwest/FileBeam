@@ -5,3 +5,5 @@ obj/
 .idea/
 *.suo
 *.log
+
+.claude/settings.local.json
