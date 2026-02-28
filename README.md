@@ -7,8 +7,12 @@ A dead-simple LAN file server. Run it, share the URL, your colleague downloads (
 - 📁 Browse directories and subdirectories
 - ⬇️ Download files with **resume support** (HTTP range requests)
 - ⬆️ Upload files via drag-and-drop or file picker (up to 100 GB)
+- 🗑️ Delete and rename files directly from the browser
+- 🔒 Optional Basic Auth password protection
+- 🚫 Read-only mode to disable uploads
+- 🔄 Live reload — the browser updates automatically when files change
 - 🖥️ Clean dark-themed web UI
-- 🔍 Live request log in the console
+- 🔍 Live request log in the console (with elapsed time)
 - 📦 Single `.exe` — no install, no runtime required
 
 ## Usage
@@ -20,7 +24,7 @@ Just double-click `filebeam.exe` or run it from a terminal:
 filebeam.exe
 ```
 
-You'll be prompted for a directory and port (defaults to current directory, port 8080).
+You'll be prompted for a source directory, upload directory, and port (defaults to current directory, port 8080).
 
 ### CLI mode (scriptable / no prompts)
 
@@ -30,8 +34,11 @@ filebeam.exe --dir "C:\Transfers" --port 9000
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--dir` | `-d` | Current directory | Directory to serve |
+| `--dir` | `-d` | Current directory | Directory to browse and serve |
+| `--target` | `-t` | Same as `--dir` | Upload destination (private; not visible to browsers) |
 | `--port` | `-p` | `8080` | Port to listen on |
+| `--password` | `--pw` | _(none)_ | Require this password via Basic Auth (any username accepted) |
+| `--readonly` | `-r` | _(off)_ | Disable uploads; hide the upload form |
 
 ### Share the URL
 
@@ -39,7 +46,7 @@ FileBeam prints all your LAN IP addresses on startup:
 
 ```
 ╭─ FileBeam is running ─╮
-│  Serving:  C:\Transfers
+│  Source:   C:\Transfers
 │  URL:      http://192.168.1.42:8080
 ╰───────────────────────╯
 ```
@@ -73,6 +80,11 @@ curl -C - -O --progress-bar http://192.168.1.42:8080/download/BigFile.zip
 **File in a subdirectory:**
 ```bash
 curl -C - -O http://192.168.1.42:8080/download/Projects/Q4/Report.xlsx
+```
+
+**With password protection:**
+```bash
+curl -u :mysecret -C - -O http://192.168.1.42:8080/download/BigFile.zip
 ```
 
 ### PowerShell (Windows)
@@ -133,8 +145,8 @@ Output: `bin\Release\net10.0\win-x64\publish\filebeam.exe`
 
 ## Security notes
 
-- **No authentication.** Intended for trusted LAN use only. Do not expose to the internet.
-- **No HTTPS.** Same reason — add a reverse proxy if you need TLS.
+- **Authentication is optional.** Use `--password` to enable Basic Auth for trusted-but-not-open LAN scenarios. Without it, anyone on the network can access the server.
+- **No HTTPS.** Intended for LAN use — add a reverse proxy if you need TLS.
 - Path traversal is blocked; requests cannot escape the served directory.
 - Filenames are sanitised on upload (directory components stripped).
 
