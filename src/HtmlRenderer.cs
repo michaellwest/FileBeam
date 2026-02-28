@@ -9,7 +9,8 @@ public static class HtmlRenderer
         string relPath,
         List<DirectoryInfo> dirs,
         List<FileInfo> files,
-        bool isReadOnly = false)
+        bool isReadOnly = false,
+        string csrfToken = "")
     {
         var segments      = relPath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
         var uploadSection = isReadOnly ? "" : BuildUploadSection(segments);
@@ -19,6 +20,7 @@ public static class HtmlRenderer
             .Replace("{{BREADCRUMB}}",      BuildBreadcrumb(segments))
             .Replace("{{ROWS}}",            BuildRows(segments, dirs, files))
             .Replace("{{UPLOAD_SECTION}}", uploadSection)
+            .Replace("{{CSRF_TOKEN}}",      HttpUtility.HtmlAttributeEncode(csrfToken))
             .Replace("{{APP_JS}}",          ResourceLoader.AppJs);
     }
 
@@ -37,10 +39,7 @@ public static class HtmlRenderer
                   <div class="hint">Multiple files supported</div>
                   <input type="file" name="files" multiple id="file-input">
                 </div>
-                <div id="file-list"></div>
-                <div id="progress-wrap" class="progress-wrap" hidden>
-                  <div id="progress-bar" class="progress-bar"></div>
-                </div>
+                <div id="upload-queue" hidden></div>
                 <button type="submit" class="btn">Upload</button>
               </form>
             </div>

@@ -1,0 +1,23 @@
+# FileBeam — Docker Compose
+#
+# Usage:
+#   docker compose up -d        # start in the background
+#   docker compose down         # stop and remove the container
+#   docker compose logs -f      # follow logs
+#
+# Files are served from the ./share directory next to this file.
+# The ./share directory is tracked in git (via .gitkeep) so it exists on checkout.
+#
+# To enable a password, read-only mode, or per-sender upload folders, add to the command:
+#   command: ["--password", "secret", "--readonly"]
+#   command: ["--upload", "/srv/share/upload", "--per-sender"]
+
+services:
+  filebeam:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./share/download:/srv/share/download
+      - ./share/upload:/srv/share/upload
+    restart: unless-stopped

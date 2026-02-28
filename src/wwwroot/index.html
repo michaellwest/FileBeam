@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{CSRF_TOKEN}}">
   <title>FileBeam — /{{PAGE_TITLE}}</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -92,20 +93,27 @@
       font-weight: 600;
     }
     .btn:hover { background: #3d8fe0; }
-    #file-list { margin-top: 0.75rem; font-size: 0.82rem; color: #aaa; }
-    .progress-wrap {
-      margin-top: 0.75rem;
-      height: 6px;
-      background: #252836;
-      border-radius: 3px;
-      overflow: hidden;
+    #upload-queue { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.4rem; }
+    .q-row {
+      display: grid;
+      grid-template-columns: 1fr auto 80px auto auto;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.82rem;
     }
-    .progress-bar {
-      height: 100%;
-      background: #5ba4f5;
-      width: 0%;
-      transition: width 0.15s ease;
+    .q-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .q-size { color: #888; white-space: nowrap; }
+    .q-bar-wrap { height: 4px; background: #252836; border-radius: 2px; overflow: hidden; }
+    .q-bar { height: 100%; width: 0%; background: #5ba4f5; border-radius: 2px; transition: width 0.15s; }
+    .q-status { text-align: right; white-space: nowrap; color: #888; min-width: 5rem; }
+    .q-ok  { color: #4caf50; }
+    .q-err { color: #f44336; }
+    .q-dim { color: #555; }
+    .q-btn {
+      background: none; border: none; cursor: pointer;
+      padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.85rem; opacity: 0.6;
     }
+    .q-btn:hover { opacity: 1; background: #252836; }
     .actions { text-align: right; white-space: nowrap; }
     .act-btn {
       background: none;
