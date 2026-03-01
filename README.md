@@ -44,7 +44,29 @@ filebeam.exe --download "./share/download" --port 9000
 | `--credentials-file`   |        | _(none)_             | Path to a per-user credentials file (see [Per-user auth](#per-user-auth)) |
 | `--readonly`           | `-r`   | _(off)_              | Disable uploads; hide the upload form                             |
 | `--per-sender`         |        | _(off)_              | Bucket uploads into per-sender subfolders inside `--upload`       |
+| `--max-upload-size`    |        | _(none)_             | Max request body size: `100MB`, `2GB`, `unlimited`                |
+| `--tls-cert`           |        | _(none)_             | Path to TLS certificate PEM file (must be used with `--tls-key`)  |
+| `--tls-key`            |        | _(none)_             | Path to TLS private key PEM file (must be used with `--tls-cert`) |
 | `--log-level`          |        | `info`               | Console verbosity: `info` (default) or `debug`                    |
+
+#### HTTPS / TLS
+
+FileBeam can serve over HTTPS using a PEM certificate and private key:
+
+```
+filebeam.exe --download ./share --tls-cert server.crt --tls-key server.key
+```
+
+Both flags must be provided together. Missing or unreadable files exit with code 1. The QR code and URL printed at startup automatically use `https://` when TLS is active.
+
+**Generating a development certificate with [certz](https://github.com/michaellwest/certz):**
+
+```
+certz create --name filebeam --ip 192.168.1.100
+filebeam.exe --download ./share --tls-cert filebeam.crt --tls-key filebeam.key
+```
+
+Clients connecting to a self-signed cert will see a browser warning; you can add the CA to your trust store to suppress it.
 
 #### Per-user auth
 
