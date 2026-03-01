@@ -284,6 +284,26 @@ function fbPreview(url, name, ext) {
 function _closePreview() {
   _previewPanel.hidden = true;
   _previewContent.innerHTML = '';
+  _previewContent.style.justifyContent = '';
+  if (_previewDownload) _previewDownload.hidden = false;
+}
+
+async function fbInfo(url, name) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) { alert('Could not load file info (status ' + res.status + ')'); return; }
+    const { name: n, size, mimeType } = await res.json();
+    _previewTitle.textContent = n;
+    if (_previewDownload) _previewDownload.hidden = true;
+    _previewContent.style.justifyContent = 'flex-start';
+    _previewContent.innerHTML =
+      '<table style="border-collapse:collapse;width:100%;font-size:0.9rem">' +
+        '<tr><td style="color:#888;padding:0.4rem 1rem 0.4rem 0;white-space:nowrap">Name</td><td>' + escHtml(n) + '</td></tr>' +
+        '<tr><td style="color:#888;padding:0.4rem 1rem 0.4rem 0;white-space:nowrap">Size</td><td>' + escHtml(size) + '</td></tr>' +
+        '<tr><td style="color:#888;padding:0.4rem 1rem 0.4rem 0;white-space:nowrap">Type</td><td>' + escHtml(mimeType) + '</td></tr>' +
+      '</table>';
+    _previewPanel.hidden = false;
+  } catch (e) { alert('Error loading file info: ' + e.message); }
 }
 document.getElementById('preview-close').addEventListener('click', _closePreview);
 document.getElementById('preview-backdrop').addEventListener('click', _closePreview);

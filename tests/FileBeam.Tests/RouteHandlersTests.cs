@@ -751,6 +751,167 @@ public sealed class RouteHandlersTests : IDisposable
         Assert.Equal(403, StatusCode(result));
     }
 
+    // ── InfoMyUpload ──────────────────────────────────────────────────────────
+
+    [Fact]
+    public void InfoMyUpload_NoPerSender_Returns404()
+    {
+        // _handlers constructed without perSender
+        var result = _handlers.InfoMyUpload(MakeContext(), "file.txt");
+        Assert.Equal(404, StatusCode(result));
+    }
+
+    [Fact]
+    public void InfoMyUpload_RoRole_Returns403()
+    {
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher, perSender: true);
+        var ctx = MakeContext();
+        ctx.Items["fb.role"] = "ro";
+        var result = handlers.InfoMyUpload(ctx, "file.txt");
+        Assert.Equal(403, StatusCode(result));
+    }
+
+    [Fact]
+    public void InfoMyUpload_FileNotFound_Returns404()
+    {
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher, perSender: true);
+        var ctx = MakeContext();
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes("alice:pass"));
+        ctx.Request.Headers.Authorization = $"Basic {encoded}";
+        var result = handlers.InfoMyUpload(ctx, "missing.txt");
+        Assert.Equal(404, StatusCode(result));
+    }
+
+    [Fact]
+    public async Task InfoMyUpload_ExistingFile_ReturnsJson()
+    {
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher, perSender: true);
+        var ctx = MakeContext();
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes("alice:pass"));
+        ctx.Request.Headers.Authorization = $"Basic {encoded}";
+
+        var senderDir = Path.Combine(_uploadDir, "alice");
+        Directory.CreateDirectory(senderDir);
+        await File.WriteAllTextAsync(Path.Combine(senderDir, "note.txt"), "hello world");
+
+        var body = await ReadBodyAsync(handlers.InfoMyUpload(ctx, "note.txt"));
+        Assert.Contains("note.txt", body);
+        Assert.Contains("sizeBytes", body);
+        Assert.Contains("mimeType", body);
+    }
+
+    // ── DeleteMyUpload ────────────────────────────────────────────────────────
+
+    [Fact]
+    public void DeleteMyUpload_NoPerSender_Returns404()
+    {
+        var result = _handlers.DeleteMyUpload(MakeContext(), "file.txt");
+        Assert.Equal(404, StatusCode(result));
+    }
+
+    [Fact]
+    public void DeleteMyUpload_RoRole_Returns403()
+    {
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher, perSender: true);
+        var ctx = MakeContext();
+        ctx.Items["fb.role"] = "ro";
+        var result = handlers.DeleteMyUpload(ctx, "file.txt");
+        Assert.Equal(403, StatusCode(result));
+    }
+
+    [Fact]
+    public async Task DeleteMyUpload_DeletesFileAndRedirects()
+    {
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher, perSender: true);
+        var ctx = MakeContext();
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes("alice:pass"));
+        ctx.Request.Headers.Authorization = $"Basic {encoded}";
+
+        var senderDir = Path.Combine(_uploadDir, "alice");
+        Directory.CreateDirectory(senderDir);
+        var file = Path.Combine(senderDir, "todelete.txt");
+        await File.WriteAllTextAsync(file, "bye");
+
+        await handlers.DeleteMyUpload(ctx, "todelete.txt").ExecuteAsync(ctx);
+
+        Assert.Equal(302, ctx.Response.StatusCode);
+        Assert.False(File.Exists(file));
+        Assert.Contains("/my-uploads", ctx.Response.Headers.Location.ToString());
+    }
+
+    [Fact]
+    public async Task DeleteMyUpload_NestedFile_RedirectsToMyUploadsParent()
+    {
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher, perSender: true);
+        var ctx = MakeContext();
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes("alice:pass"));
+        ctx.Request.Headers.Authorization = $"Basic {encoded}";
+
+        var senderDir = Path.Combine(_uploadDir, "alice", "sub");
+        Directory.CreateDirectory(senderDir);
+        var file = Path.Combine(senderDir, "nested.txt");
+        await File.WriteAllTextAsync(file, "content");
+
+        await handlers.DeleteMyUpload(ctx, "sub/nested.txt").ExecuteAsync(ctx);
+
+        Assert.Equal(302, ctx.Response.StatusCode);
+        Assert.Contains("/my-uploads/browse/sub", ctx.Response.Headers.Location.ToString());
+        Assert.False(File.Exists(file));
+    }
+
+    // ── DeleteAdminUpload ─────────────────────────────────────────────────────
+
+    [Fact]
+    public void DeleteAdminUpload_NonAdmin_Returns403()
+    {
+        var result = _handlers.DeleteAdminUpload(MakeContext(), "file.txt");
+        Assert.Equal(403, StatusCode(result));
+    }
+
+    [Fact]
+    public async Task DeleteAdminUpload_DeletesFileAndRedirects()
+    {
+        var file = Path.Combine(_uploadDir, "admin-del.txt");
+        await File.WriteAllTextAsync(file, "bye");
+
+        var ctx = MakeAdminContext();
+        await _handlers.DeleteAdminUpload(ctx, "admin-del.txt").ExecuteAsync(ctx);
+
+        Assert.Equal(302, ctx.Response.StatusCode);
+        Assert.False(File.Exists(file));
+        Assert.Contains("/admin/uploads", ctx.Response.Headers.Location.ToString());
+    }
+
+    [Fact]
+    public async Task DeleteAdminUpload_NestedFile_RedirectsToAdminParent()
+    {
+        var subDir = Path.Combine(_uploadDir, "sender1");
+        Directory.CreateDirectory(subDir);
+        var file = Path.Combine(subDir, "report.txt");
+        await File.WriteAllTextAsync(file, "data");
+
+        var ctx = MakeAdminContext();
+        await _handlers.DeleteAdminUpload(ctx, "sender1/report.txt").ExecuteAsync(ctx);
+
+        Assert.Equal(302, ctx.Response.StatusCode);
+        Assert.Contains("/admin/uploads/browse/sender1", ctx.Response.Headers.Location.ToString());
+        Assert.False(File.Exists(file));
+    }
+
+    [Fact]
+    public void DeleteAdminUpload_PathTraversal_Returns403()
+    {
+        var result = _handlers.DeleteAdminUpload(MakeAdminContext(), "../../etc/passwd");
+        Assert.Equal(403, StatusCode(result));
+    }
+
+    [Fact]
+    public void DeleteAdminUpload_FileNotFound_Returns404()
+    {
+        var result = _handlers.DeleteAdminUpload(MakeAdminContext(), "missing.txt");
+        Assert.Equal(404, StatusCode(result));
+    }
+
     // ── ListShareTokens ───────────────────────────────────────────────────────
 
     [Fact]

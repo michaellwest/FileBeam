@@ -901,6 +901,114 @@ public class RouteHandlers(
         return Results.File(stream, mimeType, info.Name, enableRangeProcessing: true);
     }
 
+    // GET /my-uploads/info/{**subpath}
+    // Returns JSON metadata for a file in the sender's own subfolder.
+    public IResult InfoMyUpload(HttpContext ctx, string? subpath)
+    {
+        if (!perSender)
+            return Results.NotFound("My Uploads requires --per-sender mode.");
+
+        if (GetRole(ctx) == "ro")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (string.IsNullOrEmpty(subpath))
+            return Results.BadRequest("No file specified.");
+
+        var senderKey  = ResolveSenderKey(ctx);
+        var senderRoot = Path.Combine(uploadDir, senderKey);
+
+        string resolved;
+        try
+        {
+            resolved = Path.GetFullPath(Path.Combine(senderRoot, subpath));
+            if (!resolved.StartsWith(uploadDir, StringComparison.OrdinalIgnoreCase))
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        if (!File.Exists(resolved))
+            return Results.NotFound("File not found.");
+
+        var info     = new FileInfo(resolved);
+        var mimeType = MimeTypes.GetMimeType(resolved);
+
+        return Results.Json(new
+        {
+            name      = info.Name,
+            sizeBytes = info.Length,
+            size      = HtmlRenderer.FormatSizePublic(info.Length),
+            mimeType
+        });
+    }
+
+    // POST /my-uploads/delete/{**subpath}
+    // Deletes a file from the sender's own subfolder; redirects to parent in /my-uploads.
+    public IResult DeleteMyUpload(HttpContext ctx, string? subpath)
+    {
+        if (!perSender)
+            return Results.NotFound("My Uploads requires --per-sender mode.");
+
+        if (GetRole(ctx) == "ro")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (string.IsNullOrEmpty(subpath))
+            return Results.BadRequest("No file specified.");
+
+        var senderKey  = ResolveSenderKey(ctx);
+        var senderRoot = Path.Combine(uploadDir, senderKey);
+
+        string resolved;
+        try
+        {
+            resolved = Path.GetFullPath(Path.Combine(senderRoot, subpath));
+            if (!resolved.StartsWith(uploadDir, StringComparison.OrdinalIgnoreCase))
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        if (!File.Exists(resolved))
+            return Results.NotFound("File not found.");
+
+        File.Delete(resolved);
+
+        var parentSubpath = Path.GetDirectoryName(subpath)?.Replace('\\', '/');
+        var redirectUrl   = string.IsNullOrEmpty(parentSubpath)
+            ? "/my-uploads"
+            : $"/my-uploads/browse/{parentSubpath}";
+        return Results.Redirect(redirectUrl);
+    }
+
+    // POST /admin/uploads/delete/{**subpath}
+    // Deletes a file from the upload directory; redirects to parent in /admin/uploads. Admin only.
+    public IResult DeleteAdminUpload(HttpContext ctx, string? subpath)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (string.IsNullOrEmpty(subpath))
+            return Results.BadRequest("No file specified.");
+
+        string resolved;
+        try
+        {
+            resolved = Path.GetFullPath(Path.Combine(uploadDir, subpath));
+            if (!resolved.StartsWith(uploadDir, StringComparison.OrdinalIgnoreCase))
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        if (!File.Exists(resolved))
+            return Results.NotFound("File not found.");
+
+        File.Delete(resolved);
+
+        var parentSubpath = Path.GetDirectoryName(subpath)?.Replace('\\', '/');
+        var redirectUrl   = string.IsNullOrEmpty(parentSubpath)
+            ? "/admin/uploads"
+            : $"/admin/uploads/browse/{parentSubpath}";
+        return Results.Redirect(redirectUrl);
+    }
+
     // GET /admin/uploads  and  GET /admin/uploads/browse/{**subpath}
     // Read-only browse of the full upload directory. Admin only.
     public IResult BrowseAdminUploads(HttpContext ctx, string? subpath = null)

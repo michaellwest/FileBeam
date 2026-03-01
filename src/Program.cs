@@ -661,14 +661,17 @@ app.MapGet("/disk-space",           handlers.DiskSpace);
 app.MapGet("/events",               handlers.FileEvents);
 
 // ── My Uploads (per-sender scoped view of upload dir) ─────────────────────────
-app.MapGet("/my-uploads",                       handlers.BrowseMyUploads);
-app.MapGet("/my-uploads/browse/{**subpath}",    handlers.BrowseMyUploads);
-app.MapGet("/my-uploads/download/{**subpath}",  handlers.DownloadMyUpload);
+app.MapGet("/my-uploads",                         handlers.BrowseMyUploads);
+app.MapGet("/my-uploads/browse/{**subpath}",      handlers.BrowseMyUploads);
+app.MapGet("/my-uploads/download/{**subpath}",    handlers.DownloadMyUpload);
+app.MapGet("/my-uploads/info/{**subpath}",        handlers.InfoMyUpload);
+app.MapPost("/my-uploads/delete/{**subpath}",     handlers.DeleteMyUpload);
 
 // ── Admin: full upload dir browse + share token list + revocation ──────────────
 app.MapGet("/admin/uploads",                            handlers.BrowseAdminUploads);
 app.MapGet("/admin/uploads/browse/{**subpath}",         handlers.BrowseAdminUploads);
 app.MapGet("/admin/uploads/download/{**subpath}",       handlers.DownloadAdminUpload);
+app.MapPost("/admin/uploads/delete/{**subpath}",        handlers.DeleteAdminUpload);
 // catch-all for direct subpath access (must be after the more-specific routes)
 app.MapGet("/admin/uploads/{**subpath}",                handlers.BrowseAdminUploads);
 app.MapGet("/admin/shares",                 handlers.ListShareTokens);
