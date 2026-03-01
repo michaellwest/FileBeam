@@ -51,17 +51,28 @@ public static class HtmlRenderer
     }
 
     /// <summary>
-    /// Builds nav link HTML for "My Uploads" and/or "Admin Uploads" based on role and config.
+    /// Builds nav link HTML for "Home", "My Uploads", and/or "All Uploads" based on role and config.
+    /// Pass <paramref name="showHome"/> = true when rendering an alternate view (my-uploads, admin/uploads)
+    /// so users can navigate back to the main file listing.
     /// </summary>
-    public static string BuildNavLinks(string role, bool perSender, bool separateUploadDir)
+    public static string BuildNavLinks(string role, bool perSender, bool separateUploadDir, bool showHome = false)
     {
+        const string sep  = """<span style="color:#444">·</span>""";
+        const string style = "font-size:0.82rem;color:#aaa;white-space:nowrap";
         var sb = new StringBuilder();
+
+        if (showHome)
+            sb.Append($"""<a href="/" style="{style}">Home</a>""");
+
         if (separateUploadDir && perSender && role != "ro")
-            sb.Append("""<a href="/my-uploads" style="font-size:0.82rem;color:#aaa;white-space:nowrap">My&nbsp;Uploads</a>""");
+        {
+            if (sb.Length > 0) sb.Append(sep);
+            sb.Append($"""<a href="/my-uploads" style="{style}">My&nbsp;Uploads</a>""");
+        }
         if (role == "admin" && separateUploadDir)
         {
-            if (sb.Length > 0) sb.Append("""<span style="color:#444">·</span>""");
-            sb.Append("""<a href="/admin/uploads" style="font-size:0.82rem;color:#aaa;white-space:nowrap">All&nbsp;Uploads</a>""");
+            if (sb.Length > 0) sb.Append(sep);
+            sb.Append($"""<a href="/admin/uploads" style="{style}">All&nbsp;Uploads</a>""");
         }
         return sb.ToString();
     }

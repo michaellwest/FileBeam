@@ -815,12 +815,15 @@ public class RouteHandlers(
             _      => desc ? files.OrderByDescending(f => f.Name)          : files.OrderBy(f => f.Name)
         };
 
+        bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
+        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, showHome: true);
         var html = HtmlRenderer.RenderDirectory(
             relPath, dirs.ToList(), files.ToList(),
             isReadOnly: true,  // no upload form in this view — uploads go through /upload
             csrfToken, sort, order, role,
             separateUploadDir: false,
-            urlBase: "my-uploads");
+            urlBase: "my-uploads",
+            navLinks: navLinks);
         return Results.Content(html, "text/html");
     }
 
@@ -863,12 +866,20 @@ public class RouteHandlers(
         return Results.File(stream, mimeType, info.Name, enableRangeProcessing: true);
     }
 
-    // GET /admin/uploads  and  GET /admin/uploads/{**subpath}
+    // GET /admin/uploads  and  GET /admin/uploads/browse/{**subpath}
     // Read-only browse of the full upload directory. Admin only.
     public IResult BrowseAdminUploads(HttpContext ctx, string? subpath = null)
     {
         if (GetRole(ctx) != "admin")
             return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        // The catch-all route /admin/uploads/{**subpath} can receive "browse/foo" when the
+        // more-specific /admin/uploads/browse/{**subpath} route is not matched first.
+        // Strip the "browse/" prefix so path resolution is always relative to uploadDir.
+        if (subpath != null && subpath.StartsWith("browse/", StringComparison.OrdinalIgnoreCase))
+            subpath = subpath["browse/".Length..];
+        else if (string.Equals(subpath, "browse", StringComparison.OrdinalIgnoreCase))
+            subpath = null;
 
         string resolved;
         try
@@ -907,12 +918,15 @@ public class RouteHandlers(
             _      => desc ? files.OrderByDescending(f => f.Name)          : files.OrderBy(f => f.Name)
         };
 
+        bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
+        var navLinks = HtmlRenderer.BuildNavLinks("admin", perSender, separateDir, showHome: true);
         var html = HtmlRenderer.RenderDirectory(
             relPath, dirs.ToList(), files.ToList(),
             isReadOnly: true,
             csrfToken, sort, order, role: "admin",
             separateUploadDir: false,
-            urlBase: "admin/uploads");
+            urlBase: "admin/uploads",
+            navLinks: navLinks);
         return Results.Content(html, "text/html");
     }
 

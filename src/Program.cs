@@ -666,8 +666,10 @@ app.MapGet("/my-uploads/browse/{**subpath}",    handlers.BrowseMyUploads);
 app.MapGet("/my-uploads/download/{**subpath}",  handlers.DownloadMyUpload);
 
 // ── Admin: full upload dir browse + share token list + revocation ──────────────
-app.MapGet("/admin/uploads",                handlers.BrowseAdminUploads);
-app.MapGet("/admin/uploads/{**subpath}",    handlers.BrowseAdminUploads);
+app.MapGet("/admin/uploads",                        handlers.BrowseAdminUploads);
+app.MapGet("/admin/uploads/browse/{**subpath}",     handlers.BrowseAdminUploads);
+// catch-all for direct subpath access (must be after the more-specific browse route)
+app.MapGet("/admin/uploads/{**subpath}",            handlers.BrowseAdminUploads);
 app.MapGet("/admin/shares",                 handlers.ListShareTokens);
 app.MapGet("/admin/revoke",                 handlers.ListRevocations);
 app.MapPost("/admin/revoke/user/{username}", handlers.RevokeUser);
