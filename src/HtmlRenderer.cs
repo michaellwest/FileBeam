@@ -221,24 +221,30 @@ public static class HtmlRenderer
         {
             var href      = browsePrefix + UrlPath(segments, dir.Name);
             var zipUrl    = zipPrefix    + UrlPath(segments, dir.Name);
-            var delDirUrl    = "/delete-dir/" + UrlPath(segments, dir.Name);
-            var renameDirUrl = "/rename-dir/" + UrlPath(segments, dir.Name);
+            var delDirUrl       = "/delete-dir/"                    + UrlPath(segments, dir.Name);
+            var renameDirUrl    = "/rename-dir/"                    + UrlPath(segments, dir.Name);
+            var myRenameDirUrl  = "/my-uploads/rename-dir/"         + UrlPath(segments, dir.Name);
+            var admRenameDirUrl = "/admin/uploads/rename-dir/"      + UrlPath(segments, dir.Name);
             var name      = HttpUtility.HtmlEncode(dir.Name);
             var nameJs    = HttpUtility.JavaScriptStringEncode(dir.Name);
             var modif     = dir.LastWriteTime.ToString("yyyy-MM-dd HH:mm");
-            var adminDirBtns = isAdmin && !isMyUploads && !isAdminUploads
-                ? $"""
-                    <button class="act-btn" title="Rename folder" onclick="fbRename('{renameDirUrl}','{nameJs}')">✏️</button>
-                    <button class="act-btn" title="Delete folder" onclick="fbDelete('{delDirUrl}','{nameJs}/')">🗑️</button>
-                  """
-                : "";
+            var dirActionBtns = isMyUploads
+                ? $"""<button class="act-btn" title="Rename folder" onclick="fbRename('{myRenameDirUrl}','{nameJs}')">✏️</button>"""
+                : isAdminUploads
+                    ? $"""<button class="act-btn" title="Rename folder" onclick="fbRename('{admRenameDirUrl}','{nameJs}')">✏️</button>"""
+                    : isAdmin
+                        ? $"""
+                            <button class="act-btn" title="Rename folder" onclick="fbRename('{renameDirUrl}','{nameJs}')">✏️</button>
+                            <button class="act-btn" title="Delete folder" onclick="fbDelete('{delDirUrl}','{nameJs}/')">🗑️</button>
+                          """
+                        : "";
             var zipBtn = isMyUploads ? "" : $"""<a href="{zipUrl}" class="act-btn" title="Download as ZIP">⬇️</a>""";
             sb.AppendLine($"""
                     <tr>
                       <td><a href="{href}" class="name"><span class="icon">📁</span>{name}/</a></td>
                       <td class="size">—</td>
                       <td class="modified">{modif}</td>
-                      <td class="actions">{zipBtn}{adminDirBtns}</td>
+                      <td class="actions">{zipBtn}{dirActionBtns}</td>
                     </tr>
                 """);
         }
@@ -251,11 +257,12 @@ public static class HtmlRenderer
             var deleteUrl = "/delete/"     + filePath;
             var renameUrl = "/rename/"     + filePath;
             var shareUrl  = "/share/"      + filePath;
-            var infoUrl      = "/my-uploads/info/"     + filePath;
-            var myDelUrl     = "/my-uploads/delete/"   + filePath;
-            var myRenameUrl  = "/my-uploads/rename/"   + filePath;
-            var admDelUrl    = "/admin/uploads/delete/" + filePath;
-            var admRenameUrl = "/admin/uploads/rename/" + filePath;
+            var browseInfoUrl = "/info/"                    + filePath;
+            var infoUrl      = "/my-uploads/info/"         + filePath;
+            var myDelUrl     = "/my-uploads/delete/"       + filePath;
+            var myRenameUrl  = "/my-uploads/rename/"       + filePath;
+            var admDelUrl    = "/admin/uploads/delete/"    + filePath;
+            var admRenameUrl = "/admin/uploads/rename/"    + filePath;
             var name      = HttpUtility.HtmlEncode(file.Name);
             var nameJs    = HttpUtility.JavaScriptStringEncode(file.Name);
             var extJs     = HttpUtility.JavaScriptStringEncode(file.Extension.ToLowerInvariant());
@@ -295,6 +302,7 @@ public static class HtmlRenderer
                       """
                     : "";
                 actionsCell = $"""
+                        <button class="act-btn" title="File info" onclick="fbInfo('{browseInfoUrl}','{nameJs}')">ℹ️</button>
                         <button class="act-btn" title="Preview" onclick="fbPreview('{href}','{nameJs}','{extJs}')">👁️</button>
                         {adminButtons}
                   """;
