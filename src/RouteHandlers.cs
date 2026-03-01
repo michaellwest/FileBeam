@@ -4,6 +4,7 @@ using System.Text;
 using System.Threading.Channels;
 using System.Web;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Hosting;
 
 namespace FileBeam;
@@ -701,6 +702,8 @@ public class RouteHandlers(
 
         return Results.Stream(async stream =>
         {
+            var syncIO = ctx.Features.Get<IHttpBodyControlFeature>();
+            if (syncIO != null) syncIO.AllowSynchronousIO = true;
             using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
             foreach (var file in Directory.EnumerateFiles(resolved, "*", SearchOption.AllDirectories))
             {
@@ -975,6 +978,53 @@ public class RouteHandlers(
         catch (IOException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status500InternalServerError); }
 
         return Results.File(stream, mimeType, info.Name, enableRangeProcessing: true);
+    }
+
+    // GET /my-uploads/download-zip/{**subpath}
+    // Downloads a directory from the sender's subfolder as a ZIP archive.
+    public IResult DownloadMyUploadsZip(HttpContext ctx, string? subpath)
+    {
+        if (!perSender)
+            return Results.NotFound("My Uploads requires --per-sender mode.");
+
+        if (GetRole(ctx) == "wo")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        var senderKey  = ResolveSenderKey(ctx);
+        var senderRoot = Path.Combine(uploadDir, senderKey);
+
+        string resolved;
+        try
+        {
+            resolved = string.IsNullOrEmpty(subpath)
+                ? senderRoot
+                : Path.GetFullPath(Path.Combine(senderRoot, subpath));
+            if (!resolved.StartsWith(uploadDir, StringComparison.OrdinalIgnoreCase))
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        if (!Directory.Exists(resolved))
+            return Results.NotFound("Directory not found.");
+
+        var folderName = string.IsNullOrEmpty(subpath)
+            ? senderKey
+            : Path.GetFileName(resolved.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+        return Results.Stream(async stream =>
+        {
+            var syncIO = ctx.Features.Get<IHttpBodyControlFeature>();
+            if (syncIO != null) syncIO.AllowSynchronousIO = true;
+            using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
+            foreach (var file in Directory.EnumerateFiles(resolved, "*", SearchOption.AllDirectories))
+            {
+                var entryName = Path.GetRelativePath(resolved, file).Replace('\\', '/');
+                var entry     = archive.CreateEntry(entryName, CompressionLevel.Fastest);
+                await using var entryStream = entry.Open();
+                await using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
+                await fs.CopyToAsync(entryStream);
+            }
+        }, "application/zip", $"{folderName}.zip");
     }
 
     // GET /admin/uploads/download/{**subpath}

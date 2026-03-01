@@ -195,7 +195,7 @@ public static class HtmlRenderer
         // Determine URL prefixes based on the view root
         var browsePrefix   = string.IsNullOrEmpty(urlBase) ? "/browse/"       : $"/{urlBase}/browse/";
         var downloadPrefix = string.IsNullOrEmpty(urlBase) ? "/download/"     : $"/{urlBase}/download/";
-        var zipPrefix      = string.IsNullOrEmpty(urlBase) ? "/download-zip/" : "/download-zip/";
+        var zipPrefix      = string.IsNullOrEmpty(urlBase) ? "/download-zip/" : $"/{urlBase}/download-zip/";
         var rootHref       = string.IsNullOrEmpty(urlBase) ? "/"              : $"/{urlBase}";
 
         var isMyUploads    = urlBase == "my-uploads";

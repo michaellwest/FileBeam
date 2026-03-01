@@ -667,8 +667,9 @@ app.MapGet("/events",               handlers.FileEvents);
 // ── My Uploads (per-sender scoped view of upload dir) ─────────────────────────
 app.MapGet("/my-uploads",                         handlers.BrowseMyUploads);
 app.MapGet("/my-uploads/browse/{**subpath}",      handlers.BrowseMyUploads);
-app.MapGet("/my-uploads/download/{**subpath}",    handlers.DownloadMyUpload);
-app.MapGet("/my-uploads/info/{**subpath}",        handlers.InfoMyUpload);
+app.MapGet("/my-uploads/download/{**subpath}",        handlers.DownloadMyUpload);
+app.MapGet("/my-uploads/download-zip/{**subpath}",    handlers.DownloadMyUploadsZip);
+app.MapGet("/my-uploads/info/{**subpath}",            handlers.InfoMyUpload);
 app.MapPost("/my-uploads/upload/{**subpath}",     handlers.UploadToMyUploads);
 app.MapPost("/my-uploads/delete/{**subpath}",     handlers.DeleteMyUpload);
 
