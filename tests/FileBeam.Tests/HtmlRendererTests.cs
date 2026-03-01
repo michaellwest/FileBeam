@@ -48,6 +48,27 @@ public class HtmlRendererTests
     }
 
     [Fact]
+    public void Render_MyUploads_UploadFormAction_PrefixedWithMyUploads()
+    {
+        // When rendering inside the my-uploads view the form should post to
+        // /my-uploads/upload/... so the handler can redirect back to /my-uploads after success.
+        var html = HtmlRenderer.RenderDirectory("", NoDirs, NoFiles,
+            separateUploadDir: false, urlBase: "my-uploads");
+
+        Assert.Contains("action=\"/my-uploads/upload/\"", html);
+        Assert.DoesNotContain("action=\"/upload/\"", html);
+    }
+
+    [Fact]
+    public void Render_MyUploads_SubfolderUploadFormAction_IncludesSubfolder()
+    {
+        var html = HtmlRenderer.RenderDirectory("photos", NoDirs, NoFiles,
+            separateUploadDir: false, urlBase: "my-uploads");
+
+        Assert.Contains("action=\"/my-uploads/upload/photos\"", html);
+    }
+
+    [Fact]
     public void Render_ReadOnlyTrue_OmitsUploadSection()
     {
         var html = HtmlRenderer.RenderDirectory("", NoDirs, NoFiles, isReadOnly: true);

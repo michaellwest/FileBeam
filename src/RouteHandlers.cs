@@ -344,7 +344,15 @@ public class RouteHandlers(
     }
 
     // POST /upload/{**subpath}
-    public async Task<IResult> UploadFiles(HttpContext ctx, string? subpath)
+    public Task<IResult> UploadFiles(HttpContext ctx, string? subpath)
+        => Upload(ctx, subpath, redirectBase: "");
+
+    // POST /my-uploads/upload/{**subpath}
+    // Same upload logic as UploadFiles but redirects back into /my-uploads after success.
+    public Task<IResult> UploadToMyUploads(HttpContext ctx, string? subpath)
+        => Upload(ctx, subpath, redirectBase: "my-uploads");
+
+    private async Task<IResult> Upload(HttpContext ctx, string? subpath, string redirectBase)
     {
         if (isReadOnly)
             return Results.StatusCode(StatusCodes.Status405MethodNotAllowed);
@@ -466,8 +474,12 @@ public class RouteHandlers(
         if (fileCount == 1 && firstName != null)
             ctx.Items["fb.file"] = firstName;
 
-        // Redirect back to the directory listing
-        var browseUrl = string.IsNullOrEmpty(subpath) ? "/" : $"/browse/{subpath}";
+        // Redirect back to the directory that was just uploaded to.
+        // For the main browse view: /browse/{subpath} (or / for root).
+        // For the my-uploads view: /my-uploads/browse/{subpath} (or /my-uploads for root).
+        var browseUrl = string.IsNullOrEmpty(redirectBase)
+            ? (string.IsNullOrEmpty(subpath) ? "/" : $"/browse/{subpath}")
+            : (string.IsNullOrEmpty(subpath) ? $"/{redirectBase}" : $"/{redirectBase}/browse/{subpath}");
         return Results.Redirect(browseUrl);
     }
 
