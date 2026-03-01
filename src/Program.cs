@@ -465,6 +465,7 @@ app.Use(async (ctx, next) =>
                     ("POST", var p) when p.StartsWith("/upload/",       StringComparison.OrdinalIgnoreCase) => "upload",
                     ("POST", var p) when p.StartsWith("/delete/",       StringComparison.OrdinalIgnoreCase) => "delete",
                     ("POST", var p) when p.StartsWith("/rename/",       StringComparison.OrdinalIgnoreCase) => "rename",
+                    ("POST", var p) when p.StartsWith("/rename-dir/",   StringComparison.OrdinalIgnoreCase) => "rename-dir",
                     _ => null
                 };
                 if (auditAction is not null)
@@ -654,7 +655,8 @@ app.MapGet("/download-zip/{**subpath}", handlers.DownloadZip);
 app.MapPost("/upload/{**subpath}",  handlers.UploadFiles);
 app.MapPost("/delete/{**subpath}",  handlers.DeleteFile);
 app.MapPost("/delete-dir/{**subpath}", handlers.DeleteDir);
-app.MapPost("/rename/{**subpath}",  handlers.RenameFile);
+app.MapPost("/rename/{**subpath}",     handlers.RenameFile);
+app.MapPost("/rename-dir/{**subpath}", handlers.RenameDir);
 app.MapPost("/share/{**subpath}",   handlers.CreateShareLink);
 app.MapGet("/s/{token}",            handlers.RedeemShareLink);
 app.MapPost("/mkdir/{**subpath}",   handlers.MkDir);
