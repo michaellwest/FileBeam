@@ -652,6 +652,7 @@ app.MapGet("/",                     handlers.ListDirectory);
 app.MapGet("/browse/{**subpath}",   handlers.BrowseDirectory);
 app.MapGet("/download/{**subpath}",     handlers.DownloadFile);
 app.MapGet("/download-zip/{**subpath}", handlers.DownloadZip);
+app.MapGet("/info/{**subpath}",         handlers.InfoFile);
 app.MapPost("/upload/{**subpath}",  handlers.UploadFiles);
 app.MapPost("/delete/{**subpath}",  handlers.DeleteFile);
 app.MapPost("/delete-dir/{**subpath}", handlers.DeleteDir);
@@ -671,15 +672,17 @@ app.MapGet("/my-uploads/download/{**subpath}",        handlers.DownloadMyUpload)
 app.MapGet("/my-uploads/download-zip/{**subpath}",    handlers.DownloadMyUploadsZip);
 app.MapGet("/my-uploads/info/{**subpath}",            handlers.InfoMyUpload);
 app.MapPost("/my-uploads/upload/{**subpath}",     handlers.UploadToMyUploads);
-app.MapPost("/my-uploads/delete/{**subpath}",     handlers.DeleteMyUpload);
-app.MapPost("/my-uploads/rename/{**subpath}",     handlers.RenameMyUpload);
+app.MapPost("/my-uploads/delete/{**subpath}",         handlers.DeleteMyUpload);
+app.MapPost("/my-uploads/rename/{**subpath}",         handlers.RenameMyUpload);
+app.MapPost("/my-uploads/rename-dir/{**subpath}",     handlers.RenameMyUploadDir);
 
 // ── Admin: full upload dir browse + share token list + revocation ──────────────
 app.MapGet("/admin/uploads",                            handlers.BrowseAdminUploads);
 app.MapGet("/admin/uploads/browse/{**subpath}",         handlers.BrowseAdminUploads);
 app.MapGet("/admin/uploads/download/{**subpath}",       handlers.DownloadAdminUpload);
-app.MapPost("/admin/uploads/delete/{**subpath}",        handlers.DeleteAdminUpload);
-app.MapPost("/admin/uploads/rename/{**subpath}",        handlers.RenameAdminUpload);
+app.MapPost("/admin/uploads/delete/{**subpath}",            handlers.DeleteAdminUpload);
+app.MapPost("/admin/uploads/rename/{**subpath}",            handlers.RenameAdminUpload);
+app.MapPost("/admin/uploads/rename-dir/{**subpath}",        handlers.RenameAdminUploadDir);
 // catch-all for direct subpath access (must be after the more-specific routes)
 app.MapGet("/admin/uploads/{**subpath}",                handlers.BrowseAdminUploads);
 app.MapGet("/admin/shares",                 handlers.ListShareTokens);
