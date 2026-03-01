@@ -172,6 +172,9 @@ public static class HtmlRenderer
         var zipPrefix      = string.IsNullOrEmpty(urlBase) ? "/download-zip/" : "/download-zip/";
         var rootHref       = string.IsNullOrEmpty(urlBase) ? "/"              : $"/{urlBase}";
 
+        var isMyUploads    = urlBase == "my-uploads";
+        var isAdminUploads = urlBase == "admin/uploads";
+
         var sb = new StringBuilder();
 
         // Parent directory link
@@ -207,32 +210,63 @@ public static class HtmlRenderer
         // Files
         foreach (var file in files)
         {
-            var href      = downloadPrefix + UrlPath(segments, file.Name);
-            var deleteUrl = "/delete/"     + UrlPath(segments, file.Name);
-            var renameUrl = "/rename/"     + UrlPath(segments, file.Name);
-            var shareUrl  = "/share/"      + UrlPath(segments, file.Name);
+            var filePath  = UrlPath(segments, file.Name);
+            var href      = downloadPrefix + filePath;
+            var deleteUrl = "/delete/"     + filePath;
+            var renameUrl = "/rename/"     + filePath;
+            var shareUrl  = "/share/"      + filePath;
+            var infoUrl   = "/my-uploads/info/" + filePath;
+            var myDelUrl  = "/my-uploads/delete/" + filePath;
+            var admDelUrl = "/admin/uploads/delete/" + filePath;
             var name      = HttpUtility.HtmlEncode(file.Name);
             var nameJs    = HttpUtility.JavaScriptStringEncode(file.Name);
             var extJs     = HttpUtility.JavaScriptStringEncode(file.Extension.ToLowerInvariant());
             var size      = FormatSize(file.Length);
             var modif     = file.LastWriteTime.ToString("yyyy-MM-dd HH:mm");
             var icon      = FileIcon(file.Extension);
-            // Admin mutation buttons only shown in the main browse view
-            var adminButtons = isAdmin && string.IsNullOrEmpty(urlBase)
-                ? $"""
+
+            string nameCell;
+            string actionsCell;
+
+            if (isMyUploads)
+            {
+                nameCell = $"""<span class="name" style="cursor:pointer;color:#5ba4f5" onclick="fbInfo('{infoUrl}','{nameJs}')"><span class="icon">{icon}</span>{name}</span>""";
+                actionsCell = $"""
+                        <button class="act-btn" title="File info" onclick="fbInfo('{infoUrl}','{nameJs}')">ℹ️</button>
+                        <button class="act-btn" title="Delete" onclick="fbDelete('{myDelUrl}','{name}')">🗑️</button>
+                  """;
+            }
+            else if (isAdminUploads)
+            {
+                nameCell = $"""<span class="name"><span class="icon">{icon}</span>{name}</span>""";
+                actionsCell = $"""
+                        <button class="act-btn" title="Delete" onclick="fbDelete('{admDelUrl}','{name}')">🗑️</button>
+                  """;
+            }
+            else
+            {
+                nameCell = $"""<a href="{href}" class="name"><span class="icon">{icon}</span>{name}</a>""";
+                // Admin mutation buttons only shown in the main browse view
+                var adminButtons = isAdmin
+                    ? $"""
                         <button class="act-btn" title="Share link" onclick="fbShare('{shareUrl}')">🔗</button>
                         <button class="act-btn" title="Rename" onclick="fbRename('{renameUrl}','{nameJs}')">✏️</button>
                         <button class="act-btn" title="Delete" onclick="fbDelete('{deleteUrl}','{name}')">🗑️</button>
-                  """
-                : "";
+                      """
+                    : "";
+                actionsCell = $"""
+                        <button class="act-btn" title="Preview" onclick="fbPreview('{href}','{nameJs}','{extJs}')">👁️</button>
+                        {adminButtons}
+                  """;
+            }
+
             sb.AppendLine($"""
                     <tr>
-                      <td><a href="{href}" class="name"><span class="icon">{icon}</span>{name}</a></td>
+                      <td>{nameCell}</td>
                       <td class="size">{size}</td>
                       <td class="modified">{modif}</td>
                       <td class="actions">
-                        <button class="act-btn" title="Preview" onclick="fbPreview('{href}','{nameJs}','{extJs}')">👁️</button>
-                        {adminButtons}
+                        {actionsCell}
                       </td>
                     </tr>
                 """);
@@ -275,6 +309,8 @@ public static class HtmlRenderer
             : segments.Append(name).ToArray();
         return string.Join("/", parts.Select(Uri.EscapeDataString));
     }
+
+    internal static string FormatSizePublic(long bytes) => FormatSize(bytes);
 
     private static string FormatSize(long bytes) => bytes switch
     {

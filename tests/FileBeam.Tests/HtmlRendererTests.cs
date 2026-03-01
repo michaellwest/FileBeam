@@ -129,6 +129,98 @@ public class HtmlRendererTests
         Assert.DoesNotContain("<script>alert(1)</script>", html);
         Assert.Contains("&lt;script&gt;", html);
     }
+
+    // ── my-uploads view rows ──────────────────────────────────────────────────
+
+    [Fact]
+    public void Render_MyUploads_FileRow_ContainsFbInfoAndDeleteButton()
+    {
+        var tmpDir  = Directory.CreateTempSubdirectory();
+        var tmpFile = new FileInfo(Path.Combine(tmpDir.FullName, "photo.jpg"));
+        tmpFile.WriteAllText("data");
+
+        try
+        {
+            var html = HtmlRenderer.RenderDirectory("", NoDirs, [tmpFile], urlBase: "my-uploads");
+
+            Assert.Contains("/my-uploads/info/photo.jpg", html);
+            Assert.Contains("fbInfo(", html);
+            Assert.Contains("/my-uploads/delete/photo.jpg", html);
+            // Should NOT contain a download anchor for the file
+            Assert.DoesNotContain("/my-uploads/download/photo.jpg", html.Split("fbInfo")[0]);
+        }
+        finally
+        {
+            tmpFile.Delete();
+            tmpDir.Delete();
+        }
+    }
+
+    [Fact]
+    public void Render_MyUploads_FileRow_NoDownloadAnchor()
+    {
+        var tmpDir  = Directory.CreateTempSubdirectory();
+        var tmpFile = new FileInfo(Path.Combine(tmpDir.FullName, "data.csv"));
+        tmpFile.WriteAllText("a,b,c");
+
+        try
+        {
+            var html = HtmlRenderer.RenderDirectory("", NoDirs, [tmpFile], urlBase: "my-uploads");
+
+            // File name should not be wrapped in an <a href="/my-uploads/download/...">
+            Assert.DoesNotContain($"href=\"/my-uploads/download/data.csv\"", html);
+        }
+        finally
+        {
+            tmpFile.Delete();
+            tmpDir.Delete();
+        }
+    }
+
+    // ── admin/uploads view rows ───────────────────────────────────────────────
+
+    [Fact]
+    public void Render_AdminUploads_FileRow_ContainsDeleteButtonOnly()
+    {
+        var tmpDir  = Directory.CreateTempSubdirectory();
+        var tmpFile = new FileInfo(Path.Combine(tmpDir.FullName, "report.pdf"));
+        tmpFile.WriteAllText("pdf");
+
+        try
+        {
+            var html = HtmlRenderer.RenderDirectory("", NoDirs, [tmpFile], role: "admin", urlBase: "admin/uploads");
+
+            Assert.Contains("/admin/uploads/delete/report.pdf", html);
+            // No preview button and no fbInfo in the row (function definitions exist in embedded JS but not as onclick attributes)
+            Assert.DoesNotContain("onclick=\"fbPreview(", html);
+            Assert.DoesNotContain("onclick=\"fbInfo(", html);
+        }
+        finally
+        {
+            tmpFile.Delete();
+            tmpDir.Delete();
+        }
+    }
+
+    [Fact]
+    public void Render_AdminUploads_FileRow_NoDownloadAnchor()
+    {
+        var tmpDir  = Directory.CreateTempSubdirectory();
+        var tmpFile = new FileInfo(Path.Combine(tmpDir.FullName, "dump.zip"));
+        tmpFile.WriteAllText("zip");
+
+        try
+        {
+            var html = HtmlRenderer.RenderDirectory("", NoDirs, [tmpFile], role: "admin", urlBase: "admin/uploads");
+
+            Assert.DoesNotContain($"href=\"/admin/uploads/download/dump.zip\"", html);
+        }
+        finally
+        {
+            tmpFile.Delete();
+            tmpDir.Delete();
+        }
+    }
 }
 
 // Convenience extension to avoid creating real files on disk for simple size tests
