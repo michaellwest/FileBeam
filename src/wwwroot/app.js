@@ -131,6 +131,13 @@ if (dz) {
     startUploads(e.dataTransfer.files);
   });
 }
+if (inp) {
+  inp.addEventListener('change', () => {
+    if (inp.files.length === 0) return;
+    startUploads(inp.files);
+    inp.value = '';
+  });
+}
 if (form) {
   form.addEventListener('submit', e => {
     e.preventDefault();
