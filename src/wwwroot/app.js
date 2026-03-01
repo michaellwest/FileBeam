@@ -78,7 +78,7 @@ function uploadFile(file) {
       anySucceeded = true;
       checkDone();
     } else {
-      markFailed(row, bar, status, btn, file);
+      markFailed(row, bar, status, btn, file, xhr.status);
     }
   });
 
@@ -99,10 +99,10 @@ function uploadFile(file) {
   xhr.send(fd);
 }
 
-function markFailed(row, bar, status, btn, file) {
+function markFailed(row, bar, status, btn, file, httpStatus = 0) {
   pendingRetries++;
   bar.style.background = '#f44336';
-  status.textContent   = 'failed';
+  status.textContent   = httpStatus === 507 ? 'disk full' : 'failed';
   status.className     = 'q-status q-err';
   const newBtn = btn.cloneNode(false);
   newBtn.textContent = '↺';
@@ -313,6 +313,25 @@ function fbMkDir(pathPrefix) {
   document.body.appendChild(f);
   f.submit();
 }
+
+// ── Disk space indicator ──────────────────────────────────────────────────────
+(async function loadDiskInfo() {
+  const el = document.getElementById('disk-info');
+  if (!el) return;
+  try {
+    const r = await fetch('/disk-space');
+    if (!r.ok) return; // 204 No Content (virtual/network drive) — hide silently
+    const { availableBytes, totalBytes } = await r.json();
+    if (!totalBytes) return;
+    const usedPct = (totalBytes - availableBytes) / totalBytes;
+    const color   = usedPct > 0.9 ? '#f44336' : usedPct > 0.8 ? '#ff9800' : '#4caf50';
+    const fmtGB   = b => (b / 1073741824).toFixed(1) + ' GB';
+    el.innerHTML =
+      `<span>${fmtGB(availableBytes)} free</span>` +
+      `<div id="disk-track"><div id="disk-fill" style="width:${Math.round(usedPct * 100)}%;background:${color}"></div></div>` +
+      `<span style="color:${color}">${Math.round(usedPct * 100)}%</span>`;
+  } catch { /* ignore — disk info is best-effort */ }
+})();
 
 // ── Live reload via Server-Sent Events ────────────────────────────────────────
 (function connectSSE() {
