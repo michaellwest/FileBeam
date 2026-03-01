@@ -200,6 +200,7 @@ public static class HtmlRenderer
 
         var isMyUploads    = urlBase == "my-uploads";
         var isAdminUploads = urlBase == "admin/uploads";
+        var isUploadArea   = urlBase == "upload-area";
 
         var sb = new StringBuilder();
 
@@ -293,19 +294,28 @@ public static class HtmlRenderer
             else
             {
                 nameCell = $"""<a href="{href}" class="name"><span class="icon">{icon}</span>{name}</a>""";
-                // Admin mutation buttons only shown in the main browse view
-                var adminButtons = isAdmin
-                    ? $"""
-                        <button class="act-btn" title="Share link" onclick="fbShare('{shareUrl}')">🔗</button>
-                        <button class="act-btn" title="Rename" onclick="fbRename('{renameUrl}','{nameJs}')">✏️</button>
-                        <button class="act-btn" title="Delete" onclick="fbDelete('{deleteUrl}','{name}')">🗑️</button>
-                      """
-                    : "";
-                actionsCell = $"""
-                        <button class="act-btn" title="File info" onclick="fbInfo('{browseInfoUrl}','{nameJs}')">ℹ️</button>
-                        <button class="act-btn" title="Preview" onclick="fbPreview('{href}','{nameJs}','{extJs}')">👁️</button>
-                        {adminButtons}
-                  """;
+                if (isUploadArea)
+                {
+                    // Upload-area resolves files from uploadDir; /info/ and admin mutation endpoints
+                    // use rootDir so they must not be shown here.
+                    actionsCell = $"""<button class="act-btn" title="Preview" onclick="fbPreview('{href}','{nameJs}','{extJs}')">👁️</button>""";
+                }
+                else
+                {
+                    // Admin mutation buttons only shown in the main browse view
+                    var adminButtons = isAdmin
+                        ? $"""
+                            <button class="act-btn" title="Share link" onclick="fbShare('{shareUrl}')">🔗</button>
+                            <button class="act-btn" title="Rename" onclick="fbRename('{renameUrl}','{nameJs}')">✏️</button>
+                            <button class="act-btn" title="Delete" onclick="fbDelete('{deleteUrl}','{name}')">🗑️</button>
+                          """
+                        : "";
+                    actionsCell = $"""
+                            <button class="act-btn" title="File info" onclick="fbInfo('{browseInfoUrl}','{nameJs}')">ℹ️</button>
+                            <button class="act-btn" title="Preview" onclick="fbPreview('{href}','{nameJs}','{extJs}')">👁️</button>
+                            {adminButtons}
+                      """;
+                }
             }
 
             sb.AppendLine($"""

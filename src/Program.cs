@@ -661,8 +661,11 @@ app.MapPost("/rename-dir/{**subpath}", handlers.RenameDir);
 app.MapPost("/share/{**subpath}",   handlers.CreateShareLink);
 app.MapGet("/s/{token}",            handlers.RedeemShareLink);
 app.MapPost("/mkdir/{**subpath}",   handlers.MkDir);
-app.MapGet("/upload-area",          handlers.BrowseUploadArea);
-app.MapGet("/disk-space",           handlers.DiskSpace);
+app.MapGet("/upload-area",                          handlers.BrowseUploadArea);
+app.MapGet("/upload-area/browse/{**subpath}",       handlers.BrowseUploadArea);
+app.MapGet("/upload-area/download/{**subpath}",     handlers.DownloadUploadAreaFile);
+app.MapGet("/upload-area/download-zip/{**subpath}", handlers.DownloadUploadAreaZip);
+app.MapGet("/disk-space",                           handlers.DiskSpace);
 app.MapGet("/events",               handlers.FileEvents);
 
 // ── My Uploads (per-sender scoped view of upload dir) ─────────────────────────

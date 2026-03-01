@@ -287,9 +287,10 @@ public class RouteHandlers(
         return Results.Content(html, "text/html");
     }
 
-    // GET /upload-area — shared upload page when upload dir is separate and --per-sender is off.
+    // GET /upload-area  and  GET /upload-area/browse/{**subpath}
+    // Shared upload page when upload dir is separate and --per-sender is off.
     // rw and admin users land here after following the nav link or notice on the browse screen.
-    public IResult BrowseUploadArea(HttpContext ctx)
+    public IResult BrowseUploadArea(HttpContext ctx, string? subpath = null)
     {
         var role = GetRole(ctx);
 
@@ -307,11 +308,127 @@ public class RouteHandlers(
         if (role == "wo")
             return Results.Redirect("/");  // wo always shows drop zone on browse
 
+        string resolved;
+        try
+        {
+            resolved = string.IsNullOrEmpty(subpath)
+                ? uploadDir
+                : Path.GetFullPath(Path.Combine(uploadDir, subpath));
+
+            if (!resolved.StartsWith(uploadDir, StringComparison.OrdinalIgnoreCase))
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        if (!Directory.Exists(resolved))
+            return Results.NotFound("Directory not found.");
+
+        var relPath = Path.GetRelativePath(uploadDir, resolved).Replace('\\', '/');
+        if (relPath == ".") relPath = "";
+
+        var sort  = ctx.Request.Query["sort"].FirstOrDefault() ?? "name";
+        var order = ctx.Request.Query["order"].FirstOrDefault() ?? "asc";
+        var desc  = string.Equals(order, "desc", StringComparison.OrdinalIgnoreCase);
+
+        var dirs = Directory.GetDirectories(resolved).Select(d => new DirectoryInfo(d));
+        dirs = sort switch
+        {
+            "date" => desc ? dirs.OrderByDescending(d => d.LastWriteTime) : dirs.OrderBy(d => d.LastWriteTime),
+            _      => desc ? dirs.OrderByDescending(d => d.Name)           : dirs.OrderBy(d => d.Name)
+        };
+
+        var files = Directory.GetFiles(resolved).Select(f => new FileInfo(f));
+        files = sort switch
+        {
+            "size" => desc ? files.OrderByDescending(f => f.Length)        : files.OrderBy(f => f.Length),
+            "date" => desc ? files.OrderByDescending(f => f.LastWriteTime) : files.OrderBy(f => f.LastWriteTime),
+            _      => desc ? files.OrderByDescending(f => f.Name)          : files.OrderBy(f => f.Name)
+        };
+
         var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, showHome: true, isReadOnly: isReadOnly);
         // Pass separateUploadDir:false so the upload form is rendered (files DO land in uploadDir here)
-        var html = HtmlRenderer.RenderDirectory("", [], [], isReadOnly, csrfToken, "name", "asc", role,
-            separateUploadDir: false, navLinks: navLinks, perSender: perSender);
+        var html = HtmlRenderer.RenderDirectory(relPath, dirs.ToList(), files.ToList(), isReadOnly, csrfToken, sort, order, role,
+            separateUploadDir: false, urlBase: "upload-area", navLinks: navLinks, perSender: perSender);
         return Results.Content(html, "text/html");
+    }
+
+    // GET /upload-area/download/{**subpath}
+    // Downloads a file from the upload directory; accessible to rw/admin users (not ro/wo).
+    public IResult DownloadUploadAreaFile(HttpContext ctx, string? subpath)
+    {
+        var role = GetRole(ctx);
+        if (role == "ro" || role == "wo")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (string.IsNullOrEmpty(subpath))
+            return Results.BadRequest("No file specified.");
+
+        string resolved;
+        try
+        {
+            resolved = Path.GetFullPath(Path.Combine(uploadDir, subpath));
+            if (!resolved.StartsWith(uploadDir, StringComparison.OrdinalIgnoreCase))
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        if (!File.Exists(resolved))
+            return Results.NotFound("File not found.");
+
+        var info     = new FileInfo(resolved);
+        var mimeType = MimeTypes.GetMimeType(resolved);
+
+        ctx.Items["fb.file"]  = info.Name;
+        ctx.Items["fb.bytes"] = info.Length;
+
+        FileStream stream;
+        try { stream = new FileStream(resolved, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true); }
+        catch (UnauthorizedAccessException) { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+        catch (IOException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status500InternalServerError); }
+
+        return Results.File(stream, mimeType, info.Name, enableRangeProcessing: true);
+    }
+
+    // GET /upload-area/download-zip/{**subpath}
+    // Downloads a folder from the upload directory as a ZIP; accessible to rw/admin users.
+    public IResult DownloadUploadAreaZip(HttpContext ctx, string? subpath)
+    {
+        var role = GetRole(ctx);
+        if (role == "ro" || role == "wo")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        string resolved;
+        try
+        {
+            resolved = string.IsNullOrEmpty(subpath)
+                ? uploadDir
+                : Path.GetFullPath(Path.Combine(uploadDir, subpath));
+            if (!resolved.StartsWith(uploadDir, StringComparison.OrdinalIgnoreCase))
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        if (!Directory.Exists(resolved))
+            return Results.NotFound("Directory not found.");
+
+        var folderName = string.IsNullOrEmpty(subpath)
+            ? Path.GetFileName(uploadDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+            : Path.GetFileName(resolved.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+        return Results.Stream(async stream =>
+        {
+            var syncIO = ctx.Features.Get<IHttpBodyControlFeature>();
+            if (syncIO != null) syncIO.AllowSynchronousIO = true;
+            using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
+            foreach (var file in Directory.EnumerateFiles(resolved, "*", SearchOption.AllDirectories))
+            {
+                var entryName = Path.GetRelativePath(resolved, file).Replace('\\', '/');
+                var entry     = archive.CreateEntry(entryName, CompressionLevel.Fastest);
+                await using var entryStream = entry.Open();
+                await using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
+                await fs.CopyToAsync(entryStream);
+            }
+        }, "application/zip", $"{folderName}.zip");
     }
 
     // GET /download/{**subpath}
