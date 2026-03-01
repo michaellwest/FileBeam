@@ -8,7 +8,7 @@ A dead-simple LAN file server. Run it, share the URL, your colleague downloads (
 - ⬇️ Download files with **resume support** (HTTP range requests)
 - ⬆️ Upload files via drag-and-drop or file picker (up to 100 GB)
 - 🗑️ Delete and rename files directly from the browser
-- 🔒 Optional Basic Auth password protection
+- 🔒 Optional Basic Auth — shared password or per-user credentials
 - 🚫 Read-only mode to disable uploads
 - 📥 Per-sender upload folders — each contributor's files land in their own subfolder
 - 🔄 Live reload — the browser updates automatically when files change
@@ -35,21 +35,39 @@ When running non-interactively (e.g. inside a container with no TTY), all prompt
 filebeam.exe --download "./share/download" --port 9000
 ```
 
-| Flag            | Short  | Default              | Description                                                  |
-| --------------- | ------ | -------------------- | ------------------------------------------------------------ |
-| `--download`    | `-s`   | Current directory    | Directory to browse and serve                                |
-| `--upload`      | `-d`   | Same as `--download` | Upload destination (private; not visible to browsers)        |
-| `--port`        | `-p`   | `8080`               | Port to listen on                                            |
-| `--password`    | `--pw` | _(none)_             | Require this password via Basic Auth (any username accepted) |
-| `--readonly`    | `-r`   | _(off)_              | Disable uploads; hide the upload form                        |
-| `--per-sender`  |        | _(off)_              | Bucket uploads into per-sender subfolders inside `--upload`  |
-| `--log-level`   |        | `info`               | Console verbosity: `info` (default) or `debug`               |
+| Flag                   | Short  | Default              | Description                                                       |
+| ---------------------- | ------ | -------------------- | ----------------------------------------------------------------- |
+| `--download`           | `-s`   | Current directory    | Directory to browse and serve                                     |
+| `--upload`             | `-d`   | Same as `--download` | Upload destination (private; not visible to browsers)             |
+| `--port`               | `-p`   | `8080`               | Port to listen on                                                 |
+| `--password`           | `--pw` | _(none)_             | Shared Basic Auth password (any username accepted)                |
+| `--credentials-file`   |        | _(none)_             | Path to a per-user credentials file (see [Per-user auth](#per-user-auth)) |
+| `--readonly`           | `-r`   | _(off)_              | Disable uploads; hide the upload form                             |
+| `--per-sender`         |        | _(off)_              | Bucket uploads into per-sender subfolders inside `--upload`       |
+| `--log-level`          |        | `info`               | Console verbosity: `info` (default) or `debug`                    |
+
+#### Per-user auth
+
+`--credentials-file` points to a plain-text file with one `username:password` entry per line.
+Lines starting with `#` and blank lines are ignored. Passwords may contain colons — only the first colon is the delimiter. Duplicate usernames: last entry wins.
+
+```
+# creds.txt
+alice:S3cret!Pass
+bob:AnotherPass123
+```
+
+```
+filebeam.exe --download ./share --credentials-file ./creds.txt
+```
+
+`--password` and `--credentials-file` can be used together. A request is authenticated when it matches **either** a per-user entry **or** the shared password.
 
 #### Per-sender upload folders
 
 When `--per-sender` is set, each uploader's files land in their own subfolder inside the upload directory:
 
-- If Basic Auth is enabled (`--password`), the subfolder is named after the **username**.
+- If Basic Auth is enabled (`--password` or `--credentials-file`), the subfolder is named after the **username**.
 - Otherwise, it is named after the sender's **IP address**.
 
 ```
@@ -269,7 +287,7 @@ Output: `src\bin\Release\net10.0\win-x64\publish\filebeam.exe`
 
 ## Security notes
 
-- **Authentication is optional.** Use `--password` to enable Basic Auth for trusted-but-not-open LAN scenarios. Without it, anyone on the network can access the server.
+- **Authentication is optional.** Use `--password` (shared) or `--credentials-file` (per-user) to enable Basic Auth for trusted-but-not-open LAN scenarios. Both can be active at the same time. Without auth, anyone on the network can access the server.
 - **No HTTPS.** Intended for LAN use — add a reverse proxy if you need TLS.
 - Path traversal is blocked; requests cannot escape the served directory.
 - Filenames are sanitised on upload (directory components stripped).
