@@ -653,6 +653,7 @@ app.MapGet("/download/{**subpath}",     handlers.DownloadFile);
 app.MapGet("/download-zip/{**subpath}", handlers.DownloadZip);
 app.MapPost("/upload/{**subpath}",  handlers.UploadFiles);
 app.MapPost("/delete/{**subpath}",  handlers.DeleteFile);
+app.MapPost("/delete-dir/{**subpath}", handlers.DeleteDir);
 app.MapPost("/rename/{**subpath}",  handlers.RenameFile);
 app.MapPost("/share/{**subpath}",   handlers.CreateShareLink);
 app.MapGet("/s/{token}",            handlers.RedeemShareLink);
