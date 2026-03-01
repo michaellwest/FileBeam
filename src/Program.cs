@@ -83,14 +83,60 @@ int port = cliPort ?? (interactive ? AnsiConsole.Ask("[bold]Port[/]:", 8080) : 8
 
 string? password = cliPassword;
 
-// ── Load per-user credentials file (optional) ─────────────────────────────────
-IReadOnlyDictionary<string, string> userCredentials = new Dictionary<string, string>();
+// ── Validate and load per-user credentials file (optional) ────────────────────
+CredentialFileWatcher? credWatcher = null;
 if (!string.IsNullOrEmpty(cliCredentialsFile))
 {
-    if (!File.Exists(cliCredentialsFile))
-        AnsiConsole.MarkupLine($"[yellow]Warning:[/] credentials file not found: {cliCredentialsFile}");
+    var absCredPath = Path.GetFullPath(cliCredentialsFile);
+
+    // Hard-stop on unrecoverable config problems
+    if (Directory.Exists(absCredPath))
+    {
+        AnsiConsole.MarkupLine($"[red]Error:[/] --credentials-file path is a directory: {absCredPath}");
+        return 1;
+    }
+
+    var credDir = Path.GetDirectoryName(absCredPath)!;
+    if (!Directory.Exists(credDir))
+    {
+        AnsiConsole.MarkupLine($"[red]Error:[/] --credentials-file parent directory does not exist: {credDir}");
+        return 1;
+    }
+
+    if (File.Exists(absCredPath))
+    {
+        // Verify the file is actually readable before starting the server
+        try { _ = File.ReadAllBytes(absCredPath); }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]Error:[/] cannot read credentials file: {Markup.Escape(ex.Message)}");
+            return 1;
+        }
+
+        // Report any parse warnings at startup
+        var (_, warnings) = CredentialStore.LoadFileWithDiagnostics(absCredPath);
+        foreach (var w in warnings)
+            AnsiConsole.MarkupLine(
+                $"[yellow]Warning:[/] credentials file line {w.LineNumber}: {Markup.Escape(w.Reason)} — \"{Markup.Escape(w.LineText)}\"");
+    }
     else
-        userCredentials = CredentialStore.LoadFile(cliCredentialsFile);
+    {
+        AnsiConsole.MarkupLine(
+            $"[yellow]Warning:[/] credentials file not found: {absCredPath} — " +
+            "server will reject all per-user logins until the file appears");
+    }
+
+    credWatcher = new CredentialFileWatcher(absCredPath);
+
+    // Log every hot-reload to the console
+    credWatcher.Reloaded += creds =>
+    {
+        var t = DateTime.UtcNow.ToString("o");
+        if (creds.Count == 0)
+            AnsiConsole.MarkupLine($"[grey]{t}[/]  [yellow][[WARN]][/]  credentials file unloaded — all per-user logins rejected");
+        else
+            AnsiConsole.MarkupLine($"[grey]{t}[/]  [blue][[INFO]][/]  credentials reloaded — {creds.Count} user{(creds.Count == 1 ? "" : "s")}");
+    };
 }
 
 // ── Resolve LAN IPs ────────────────────────────────────────────────────────────
@@ -113,8 +159,10 @@ var panel = new Panel(
         (perSender    ? "[bold]Upload:[/]   Per-sender folders\n" : "") +
         (readOnly     ? "[bold yellow]Mode:[/]     Read-only (uploads disabled)\n" : "") +
         (logLevel != "info" ? $"[bold]Log:[/]      {logLevel}\n" : "") +
-        (userCredentials.Count > 0
-            ? $"[bold]Auth:[/]     {userCredentials.Count} per-user credential{(userCredentials.Count == 1 ? "" : "s")} loaded [yellow](HTTP — credentials unencrypted)[/]\n"
+        (credWatcher is not null
+            ? credWatcher.Current.Count > 0
+                ? $"[bold]Auth:[/]     {credWatcher.Current.Count} per-user credential{(credWatcher.Current.Count == 1 ? "" : "s")} loaded [yellow](HTTP — credentials unencrypted)[/]\n"
+                : "[bold yellow]Auth:[/]     Per-user credentials enforced (0 valid entries — all logins rejected) [yellow](HTTP — credentials unencrypted)[/]\n"
             : "") +
         (!string.IsNullOrEmpty(password)
             ? "[bold]Auth:[/]     Shared password required [yellow](HTTP — credentials unencrypted)[/]\n"
@@ -274,7 +322,9 @@ static string FormatBytes(long bytes) => bytes switch
 app.UseRateLimiter();
 
 // ── Basic Auth + brute-force lockout (optional) ───────────────────────────────
-bool authRequired = !string.IsNullOrEmpty(password) || userCredentials.Count > 0;
+// authRequired is true whenever --credentials-file was specified (even if file is
+// currently missing) so that the server never silently starts unprotected.
+bool authRequired = !string.IsNullOrEmpty(password) || credWatcher is not null;
 if (authRequired)
 {
     // Per-IP failed-attempt tracking.  Entries are trimmed when the dict grows large
@@ -317,8 +367,9 @@ if (authRequired)
                     var submittedUser = decoded[..colon];
                     var submittedPass = decoded[(colon + 1)..];
 
-                    // 1. Check per-user credentials (username AND password must match)
-                    if (userCredentials.TryGetValue(submittedUser, out var expectedPass))
+                    // 1. Check per-user credentials (username AND password must match).
+                    //    Read Current snapshot once — it may be hot-swapped by the file watcher.
+                    if (credWatcher?.Current.TryGetValue(submittedUser, out var expectedPass) == true)
                         authenticated = CredentialStore.VerifyPassword(submittedPass, expectedPass);
 
                     // 2. Fall back to shared password (any username accepted)
@@ -389,5 +440,6 @@ app.MapPost("/delete/{**subpath}",  handlers.DeleteFile);
 app.MapPost("/rename/{**subpath}",  handlers.RenameFile);
 app.MapGet("/events",               handlers.FileEvents);
 
-await app.RunAsync();
+try   { await app.RunAsync(); }
+finally { credWatcher?.Dispose(); }
 return 0;
