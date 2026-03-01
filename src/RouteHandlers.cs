@@ -235,7 +235,8 @@ public class RouteHandlers(
         // Write-only users see the root upload drop zone regardless of the path they visited.
         if (role == "wo")
         {
-            var woHtml = HtmlRenderer.RenderDirectory("", [], [], isReadOnly, csrfToken, "name", "asc", role);
+            var woHtml = HtmlRenderer.RenderDirectory("", [], [], isReadOnly, csrfToken, "name", "asc", role,
+                separateUploadDir: !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase));
             return Results.Content(woHtml, "text/html");
         }
 
@@ -268,7 +269,8 @@ public class RouteHandlers(
             _      => desc ? files.OrderByDescending(f => f.Name)          : files.OrderBy(f => f.Name)
         };
 
-        var html = HtmlRenderer.RenderDirectory(relPath, dirs.ToList(), files.ToList(), isReadOnly, csrfToken, sort, order, role);
+        var html = HtmlRenderer.RenderDirectory(relPath, dirs.ToList(), files.ToList(), isReadOnly, csrfToken, sort, order, role,
+            separateUploadDir: !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase));
         return Results.Content(html, "text/html");
     }
 
