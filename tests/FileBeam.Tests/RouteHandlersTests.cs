@@ -167,6 +167,63 @@ public sealed class RouteHandlersTests : IDisposable
         Assert.Contains("subdir",   body);
     }
 
+    // ── Sort ──────────────────────────────────────────────────────────────────
+
+    private DefaultHttpContext MakeSortContext(string sort, string order)
+    {
+        var ctx = MakeContext();
+        ctx.Request.QueryString = new QueryString($"?sort={sort}&order={order}");
+        return ctx;
+    }
+
+    [Fact]
+    public async Task BrowseDirectory_SortByNameDesc_ListsFilesReversed()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_rootDir, "a.txt"), "");
+        await File.WriteAllTextAsync(Path.Combine(_rootDir, "z.txt"), "");
+
+        var body = await ReadBodyAsync(_handlers.BrowseDirectory(MakeSortContext("name", "desc"), null));
+
+        var posA = body.IndexOf("a.txt", StringComparison.Ordinal);
+        var posZ = body.IndexOf("z.txt", StringComparison.Ordinal);
+        Assert.True(posZ < posA, "z.txt should appear before a.txt in descending name sort");
+    }
+
+    [Fact]
+    public async Task BrowseDirectory_SortBySize_ListsFilesInSizeOrder()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_rootDir, "big.txt"),   new string('x', 1000));
+        await File.WriteAllTextAsync(Path.Combine(_rootDir, "small.txt"), "hi");
+
+        var body = await ReadBodyAsync(_handlers.BrowseDirectory(MakeSortContext("size", "desc"), null));
+
+        var posBig   = body.IndexOf("big.txt",   StringComparison.Ordinal);
+        var posSmall = body.IndexOf("small.txt", StringComparison.Ordinal);
+        Assert.True(posBig < posSmall, "big.txt should appear before small.txt in descending size sort");
+    }
+
+    [Fact]
+    public async Task BrowseDirectory_DirsAlwaysBeforeFiles()
+    {
+        Directory.CreateDirectory(Path.Combine(_rootDir, "zzz-dir"));
+        await File.WriteAllTextAsync(Path.Combine(_rootDir, "aaa.txt"), "");
+
+        var body = await ReadBodyAsync(_handlers.BrowseDirectory(MakeContext(), null));
+
+        var posDir  = body.IndexOf("zzz-dir", StringComparison.Ordinal);
+        var posFile = body.IndexOf("aaa.txt", StringComparison.Ordinal);
+        Assert.True(posDir < posFile, "directories should appear before files");
+    }
+
+    [Fact]
+    public async Task BrowseDirectory_SortHeaders_ContainSortLinks()
+    {
+        var body = await ReadBodyAsync(_handlers.BrowseDirectory(MakeSortContext("name", "asc"), null));
+        Assert.Contains("?sort=name", body);
+        Assert.Contains("?sort=size", body);
+        Assert.Contains("?sort=date", body);
+    }
+
     // ── DeleteFile ────────────────────────────────────────────────────────────
 
     [Fact]

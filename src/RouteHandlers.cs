@@ -204,10 +204,26 @@ public class RouteHandlers(
         var relPath = Path.GetRelativePath(rootDir, resolved);
         if (relPath == ".") relPath = "";
 
-        var dirs  = Directory.GetDirectories(resolved).Select(d => new DirectoryInfo(d)).OrderBy(d => d.Name).ToList();
-        var files = Directory.GetFiles(resolved).Select(f => new FileInfo(f)).OrderBy(f => f.Name).ToList();
+        var sort  = ctx.Request.Query["sort"].FirstOrDefault() ?? "name";
+        var order = ctx.Request.Query["order"].FirstOrDefault() ?? "asc";
+        var desc  = string.Equals(order, "desc", StringComparison.OrdinalIgnoreCase);
 
-        var html = HtmlRenderer.RenderDirectory(relPath, dirs, files, isReadOnly, csrfToken);
+        var dirs = Directory.GetDirectories(resolved).Select(d => new DirectoryInfo(d));
+        dirs = sort switch
+        {
+            "date" => desc ? dirs.OrderByDescending(d => d.LastWriteTime) : dirs.OrderBy(d => d.LastWriteTime),
+            _      => desc ? dirs.OrderByDescending(d => d.Name)           : dirs.OrderBy(d => d.Name)
+        };
+
+        var files = Directory.GetFiles(resolved).Select(f => new FileInfo(f));
+        files = sort switch
+        {
+            "size" => desc ? files.OrderByDescending(f => f.Length)        : files.OrderBy(f => f.Length),
+            "date" => desc ? files.OrderByDescending(f => f.LastWriteTime) : files.OrderBy(f => f.LastWriteTime),
+            _      => desc ? files.OrderByDescending(f => f.Name)          : files.OrderBy(f => f.Name)
+        };
+
+        var html = HtmlRenderer.RenderDirectory(relPath, dirs.ToList(), files.ToList(), isReadOnly, csrfToken, sort, order);
         return Results.Content(html, "text/html");
     }
 
