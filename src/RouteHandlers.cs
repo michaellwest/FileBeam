@@ -490,6 +490,35 @@ public class RouteHandlers(
         return Results.Redirect(browseUrl);
     }
 
+    // POST /delete-dir/{**subpath}
+    public IResult DeleteDir(HttpContext ctx, string? subpath)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (string.IsNullOrEmpty(subpath))
+            return Results.BadRequest("No folder specified.");
+
+        string resolved;
+        try { resolved = SafeResolvePath(subpath); }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        if (string.Equals(resolved, rootDir, StringComparison.OrdinalIgnoreCase))
+            return Results.BadRequest("Cannot delete the root directory.");
+
+        if (!Directory.Exists(resolved))
+            return Results.NotFound("Directory not found.");
+
+        if (Directory.EnumerateFileSystemEntries(resolved).Any())
+            return Results.Conflict("Directory is not empty.");
+
+        Directory.Delete(resolved);
+
+        var parentSubpath = Path.GetDirectoryName(subpath)?.Replace('\\', '/');
+        var browseUrl = string.IsNullOrEmpty(parentSubpath) ? "/" : $"/browse/{parentSubpath}";
+        return Results.Redirect(browseUrl);
+    }
+
     // POST /rename/{**subpath}
     public async Task<IResult> RenameFile(HttpContext ctx, string? subpath)
     {
