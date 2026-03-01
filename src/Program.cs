@@ -23,6 +23,7 @@ long    maxUploadBytes      = 0;   // per-sender cumulative bytes; 0 = unlimited
 long?   maxUploadSize       = null; // null = keep large default; 0 = unlimited
 string? cliTlsCert          = null;
 string? cliTlsKey           = null;
+int     shareTtl            = 3600; // default share link TTL in seconds
 int     rateLimit           = 60;  // requests per minute per IP
 string  logLevel            = "info"; // info | debug
 
@@ -61,6 +62,8 @@ for (int i = 0; i < args.Length; i++)
         cliTlsCert = args[++i];
     else if (args[i] == "--tls-key" && i + 1 < args.Length)
         cliTlsKey = args[++i];
+    else if (args[i] == "--share-ttl" && i + 1 < args.Length)
+        shareTtl = int.TryParse(args[++i], out var st) && st > 0 ? st : 3600;
     else if (args[i] == "--rate-limit"   && i + 1 < args.Length)
         rateLimit = int.TryParse(args[++i], out var rl) ? rl : 60;
     else if (args[i] == "--log-level"   && i + 1 < args.Length)
@@ -349,6 +352,7 @@ var handlers = new RouteHandlers(
     maxFileSize:            maxFileSize,
     maxUploadBytesPerSender:maxUploadBytes,
     csrfToken:              csrfToken,
+    shareTtlSeconds:        shareTtl,
     debugLog:               debugLog);
 
 // ── Console request log (with elapsed time) ──────────────────────────────────
@@ -442,6 +446,13 @@ if (authRequired)
 
     app.Use(async (ctx, next) =>
     {
+        // Share link redemption (GET /s/{token}) is always unauthenticated
+        if (ctx.Request.Method == "GET" && ctx.Request.Path.StartsWithSegments("/s"))
+        {
+            await next();
+            return;
+        }
+
         var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
         // Check lockout before touching the header
@@ -544,6 +555,8 @@ app.MapGet("/download-zip/{**subpath}", handlers.DownloadZip);
 app.MapPost("/upload/{**subpath}",  handlers.UploadFiles);
 app.MapPost("/delete/{**subpath}",  handlers.DeleteFile);
 app.MapPost("/rename/{**subpath}",  handlers.RenameFile);
+app.MapPost("/share/{**subpath}",   handlers.CreateShareLink);
+app.MapGet("/s/{token}",            handlers.RedeemShareLink);
 app.MapPost("/mkdir/{**subpath}",   handlers.MkDir);
 app.MapGet("/events",               handlers.FileEvents);
 

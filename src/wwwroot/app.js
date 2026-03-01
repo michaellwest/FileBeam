@@ -151,6 +151,22 @@ function fbRename(url, currentName) {
   f.submit();
 }
 
+// ── Share link ────────────────────────────────────────────────────────────────
+async function fbShare(url) {
+  const fd = new FormData();
+  fd.append('_csrf', csrfToken);
+  try {
+    const res = await fetch(url, { method: 'POST', body: fd });
+    if (!res.ok) { alert('Failed to create share link (status ' + res.status + ')'); return; }
+    const { url: shareUrl, expiresIn } = await res.json();
+    const full = location.origin + shareUrl;
+    const hours = Math.round(expiresIn / 3600 * 10) / 10;
+    prompt(`Share link (expires in ${hours}h):`, full);
+  } catch (e) {
+    alert('Error creating share link: ' + e.message);
+  }
+}
+
 // ── New folder ────────────────────────────────────────────────────────────────
 function fbMkDir(pathPrefix) {
   const name = prompt('New folder name:');

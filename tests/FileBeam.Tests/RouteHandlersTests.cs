@@ -346,6 +346,67 @@ public sealed class RouteHandlersTests : IDisposable
         Assert.Equal(400, StatusCode(result));
     }
 
+    // ── Share links ───────────────────────────────────────────────────────────
+
+    [Fact]
+    public void CreateShareLink_NoSubpath_Returns400()
+    {
+        var result = _handlers.CreateShareLink(MakeContext(), null);
+        Assert.Equal(400, StatusCode(result));
+    }
+
+    [Fact]
+    public void CreateShareLink_FileNotFound_Returns404()
+    {
+        var result = _handlers.CreateShareLink(MakeContext(), "missing.txt");
+        Assert.Equal(404, StatusCode(result));
+    }
+
+    [Theory]
+    [InlineData("../escape.txt")]
+    public void CreateShareLink_PathTraversal_Returns403(string subpath)
+    {
+        var result = _handlers.CreateShareLink(MakeContext(), subpath);
+        Assert.Equal(403, StatusCode(result));
+    }
+
+    [Fact]
+    public async Task CreateShareLink_ValidFile_Returns200WithUrl()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_rootDir, "shared.txt"), "hello");
+        var body = await ReadBodyAsync(_handlers.CreateShareLink(MakeContext(), "shared.txt"));
+        Assert.Contains("/s/", body);
+    }
+
+    [Fact]
+    public void RedeemShareLink_InvalidToken_Returns404()
+    {
+        var result = _handlers.RedeemShareLink("nonexistenttoken");
+        Assert.Equal(404, StatusCode(result));
+    }
+
+    [Fact]
+    public async Task RedeemShareLink_ValidToken_ServesFile()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_rootDir, "download.txt"), "content");
+        var body = await ReadBodyAsync(_handlers.CreateShareLink(MakeContext(), "download.txt"));
+        var token = System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("url").GetString()!.Split('/')[^1];
+
+        var result = _handlers.RedeemShareLink(token);
+        Assert.Equal(200, await ExecuteAsync(result));
+    }
+
+    [Fact]
+    public async Task CreateShareLink_IncludesExpiresIn()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_rootDir, "timed.txt"), "data");
+        var ctx = MakeContext();
+        ctx.Request.QueryString = new QueryString("?ttl=120");
+        var body = await ReadBodyAsync(_handlers.CreateShareLink(ctx, "timed.txt"));
+        var doc  = System.Text.Json.JsonDocument.Parse(body).RootElement;
+        Assert.Equal(120, doc.GetProperty("expiresIn").GetInt32());
+    }
+
     // ── DownloadZip ───────────────────────────────────────────────────────────
 
     [Fact]
