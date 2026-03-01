@@ -232,12 +232,13 @@ public static class HtmlRenderer
                     <button class="act-btn" title="Delete folder" onclick="fbDelete('{delDirUrl}','{nameJs}/')">🗑️</button>
                   """
                 : "";
+            var zipBtn = isMyUploads ? "" : $"""<a href="{zipUrl}" class="act-btn" title="Download as ZIP">⬇️</a>""";
             sb.AppendLine($"""
                     <tr>
                       <td><a href="{href}" class="name"><span class="icon">📁</span>{name}/</a></td>
                       <td class="size">—</td>
                       <td class="modified">{modif}</td>
-                      <td class="actions"><a href="{zipUrl}" class="act-btn" title="Download as ZIP">⬇️</a>{adminDirBtns}</td>
+                      <td class="actions">{zipBtn}{adminDirBtns}</td>
                     </tr>
                 """);
         }
