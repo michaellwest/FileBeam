@@ -289,21 +289,27 @@ function _closePreview() {
 }
 
 async function fbInfo(url, name) {
+  _previewTitle.textContent = name;
+  if (_previewDownload) _previewDownload.hidden = true;
+  _previewContent.style.justifyContent = 'flex-start';
+  _previewContent.innerHTML = '<p style="color:#888;font-size:0.9rem">Computing…</p>';
+  _previewPanel.hidden = false;
   try {
     const res = await fetch(url);
-    if (!res.ok) { alert('Could not load file info (status ' + res.status + ')'); return; }
-    const { name: n, size, mimeType } = await res.json();
+    if (!res.ok) { _previewContent.innerHTML = '<p style="color:#e06c75">Could not load file info (status ' + res.status + ').</p>'; return; }
+    const { name: n, size, modified, mimeType, sha256 } = await res.json();
+    const tdL = 'style="color:#888;padding:0.4rem 1rem 0.4rem 0;white-space:nowrap;vertical-align:top"';
+    const tdR = 'style="word-break:break-all"';
     _previewTitle.textContent = n;
-    if (_previewDownload) _previewDownload.hidden = true;
-    _previewContent.style.justifyContent = 'flex-start';
     _previewContent.innerHTML =
       '<table style="border-collapse:collapse;width:100%;font-size:0.9rem">' +
-        '<tr><td style="color:#888;padding:0.4rem 1rem 0.4rem 0;white-space:nowrap">Name</td><td>' + escHtml(n) + '</td></tr>' +
-        '<tr><td style="color:#888;padding:0.4rem 1rem 0.4rem 0;white-space:nowrap">Size</td><td>' + escHtml(size) + '</td></tr>' +
-        '<tr><td style="color:#888;padding:0.4rem 1rem 0.4rem 0;white-space:nowrap">Type</td><td>' + escHtml(mimeType) + '</td></tr>' +
+        '<tr><td ' + tdL + '>Name</td><td ' + tdR + '>' + escHtml(n) + '</td></tr>' +
+        '<tr><td ' + tdL + '>Size</td><td ' + tdR + '>' + escHtml(size) + '</td></tr>' +
+        '<tr><td ' + tdL + '>Modified</td><td ' + tdR + '>' + escHtml(modified) + '</td></tr>' +
+        '<tr><td ' + tdL + '>Type</td><td ' + tdR + '>' + escHtml(mimeType) + '</td></tr>' +
+        '<tr><td ' + tdL + '>SHA-256</td><td ' + tdR + '><code style="font-size:0.8rem">' + escHtml(sha256) + '</code></td></tr>' +
       '</table>';
-    _previewPanel.hidden = false;
-  } catch (e) { alert('Error loading file info: ' + e.message); }
+  } catch (e) { _previewContent.innerHTML = '<p style="color:#e06c75">Error loading file info: ' + escHtml(e.message) + '</p>'; }
 }
 document.getElementById('preview-close').addEventListener('click', _closePreview);
 document.getElementById('preview-backdrop').addEventListener('click', _closePreview);

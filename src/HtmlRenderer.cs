@@ -251,9 +251,11 @@ public static class HtmlRenderer
             var deleteUrl = "/delete/"     + filePath;
             var renameUrl = "/rename/"     + filePath;
             var shareUrl  = "/share/"      + filePath;
-            var infoUrl   = "/my-uploads/info/" + filePath;
-            var myDelUrl  = "/my-uploads/delete/" + filePath;
-            var admDelUrl = "/admin/uploads/delete/" + filePath;
+            var infoUrl      = "/my-uploads/info/"     + filePath;
+            var myDelUrl     = "/my-uploads/delete/"   + filePath;
+            var myRenameUrl  = "/my-uploads/rename/"   + filePath;
+            var admDelUrl    = "/admin/uploads/delete/" + filePath;
+            var admRenameUrl = "/admin/uploads/rename/" + filePath;
             var name      = HttpUtility.HtmlEncode(file.Name);
             var nameJs    = HttpUtility.JavaScriptStringEncode(file.Name);
             var extJs     = HttpUtility.JavaScriptStringEncode(file.Extension.ToLowerInvariant());
@@ -269,6 +271,7 @@ public static class HtmlRenderer
                 nameCell = $"""<span class="name" style="cursor:pointer;color:#5ba4f5" onclick="fbInfo('{infoUrl}','{nameJs}')"><span class="icon">{icon}</span>{name}</span>""";
                 actionsCell = $"""
                         <button class="act-btn" title="File info" onclick="fbInfo('{infoUrl}','{nameJs}')">ℹ️</button>
+                        <button class="act-btn" title="Rename" onclick="fbRename('{myRenameUrl}','{nameJs}')">✏️</button>
                         <button class="act-btn" title="Delete" onclick="fbDelete('{myDelUrl}','{name}')">🗑️</button>
                   """;
             }
@@ -276,6 +279,7 @@ public static class HtmlRenderer
             {
                 nameCell = $"""<span class="name"><span class="icon">{icon}</span>{name}</span>""";
                 actionsCell = $"""
+                        <button class="act-btn" title="Rename" onclick="fbRename('{admRenameUrl}','{nameJs}')">✏️</button>
                         <button class="act-btn" title="Delete" onclick="fbDelete('{admDelUrl}','{name}')">🗑️</button>
                   """;
             }
