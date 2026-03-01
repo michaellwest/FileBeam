@@ -19,6 +19,7 @@ bool    readOnly            = false;
 bool    perSender           = false;
 long    maxFileSize         = 0;   // bytes; 0 = unlimited
 long    maxUploadBytes      = 0;   // per-sender cumulative bytes; 0 = unlimited
+long?   maxUploadSize       = null; // null = keep large default; 0 = unlimited
 int     rateLimit           = 60;  // requests per minute per IP
 string  logLevel            = "info"; // info | debug
 
@@ -42,10 +43,54 @@ for (int i = 0; i < args.Length; i++)
         maxFileSize = long.TryParse(args[++i], out var mf) ? mf : 0;
     else if (args[i] == "--max-upload-bytes" && i + 1 < args.Length)
         maxUploadBytes = long.TryParse(args[++i], out var mu) ? mu : 0;
+    else if (args[i] == "--max-upload-size" && i + 1 < args.Length)
+    {
+        var raw = args[++i];
+        if (!TryParseSize(raw, out var parsed))
+        {
+            AnsiConsole.MarkupLine($"[red]Error:[/] --max-upload-size invalid value '{Markup.Escape(raw)}'. " +
+                "Use e.g. 500MB, 2GB, 100KB, or 'unlimited'.");
+            return 1;
+        }
+        maxUploadSize = parsed;
+    }
     else if (args[i] == "--rate-limit"   && i + 1 < args.Length)
         rateLimit = int.TryParse(args[++i], out var rl) ? rl : 60;
     else if (args[i] == "--log-level"   && i + 1 < args.Length)
         logLevel = args[++i].ToLowerInvariant();
+}
+
+/// <summary>
+/// Parses a human-readable size string (e.g. "500MB", "2GB", "100KB", "unlimited", "0").
+/// Returns true on success; bytes is 0 for "unlimited".
+/// </summary>
+static bool TryParseSize(string raw, out long bytes)
+{
+    bytes = 0;
+    if (string.IsNullOrWhiteSpace(raw)) return false;
+
+    var s = raw.Trim();
+    if (s.Equals("unlimited", StringComparison.OrdinalIgnoreCase) || s == "0")
+        return true;
+
+    // Split numeric part from unit suffix
+    int split = s.Length;
+    while (split > 0 && !char.IsDigit(s[split - 1])) split--;
+    if (split == 0) return false;
+
+    if (!long.TryParse(s[..split], out var num) || num < 0) return false;
+    var unit = s[split..].Trim().ToUpperInvariant();
+
+    bytes = unit switch
+    {
+        "" or "B"  => num,
+        "KB"       => num * 1_024L,
+        "MB"       => num * 1_024L * 1_024,
+        "GB"       => num * 1_024L * 1_024 * 1_024,
+        "TB"       => num * 1_024L * 1_024 * 1_024 * 1_024,
+        _          => -1
+    };
+    return bytes >= 0;
 }
 
 // ── Banner ─────────────────────────────────────────────────────────────────────
@@ -192,20 +237,28 @@ var csrfToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
 // ── Build & start Kestrel ──────────────────────────────────────────────────────
 var builder = WebApplication.CreateBuilder();
 builder.Logging.ClearProviders(); // suppress default ASP.NET logging; we do our own
+// Effective body-size limit for Kestrel and form parsing:
+// --max-upload-size takes precedence; otherwise fall back to --max-file-size headroom;
+// 0/null on --max-upload-size means unlimited (null in Kestrel).
+long? effectiveBodyLimit = maxUploadSize switch
+{
+    0    => null,                                   // unlimited
+    long n when n > 0 => n,                         // explicit limit
+    _    => maxFileSize > 0                          // fallback: per-file size + 1 MB headroom
+               ? maxFileSize + (1024 * 1024)
+               : 100L * 1024 * 1024 * 1024          // 100 GB safety cap
+};
+
 builder.WebHost.ConfigureKestrel(opts =>
 {
     opts.Listen(IPAddress.Any, port);
-    opts.Limits.MaxRequestBodySize = maxFileSize > 0
-        ? maxFileSize + (1024 * 1024)   // add 1 MB headroom for multipart framing
-        : 100L * 1024 * 1024 * 1024;    // 100 GB default cap
+    opts.Limits.MaxRequestBodySize = effectiveBodyLimit;
 });
 
 // Allow large multipart uploads (default is 30 MB)
 builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o =>
 {
-    o.MultipartBodyLengthLimit = maxFileSize > 0
-        ? maxFileSize + (1024 * 1024)
-        : 100L * 1024 * 1024 * 1024;
+    o.MultipartBodyLengthLimit = effectiveBodyLimit ?? long.MaxValue;
 });
 
 // ── Rate limiting: fixed-window per remote IP ─────────────────────────────────
