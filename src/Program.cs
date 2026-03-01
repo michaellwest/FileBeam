@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.RateLimiting;
 using FileBeam;
@@ -20,6 +21,8 @@ bool    perSender           = false;
 long    maxFileSize         = 0;   // bytes; 0 = unlimited
 long    maxUploadBytes      = 0;   // per-sender cumulative bytes; 0 = unlimited
 long?   maxUploadSize       = null; // null = keep large default; 0 = unlimited
+string? cliTlsCert          = null;
+string? cliTlsKey           = null;
 int     rateLimit           = 60;  // requests per minute per IP
 string  logLevel            = "info"; // info | debug
 
@@ -54,6 +57,10 @@ for (int i = 0; i < args.Length; i++)
         }
         maxUploadSize = parsed;
     }
+    else if (args[i] == "--tls-cert" && i + 1 < args.Length)
+        cliTlsCert = args[++i];
+    else if (args[i] == "--tls-key" && i + 1 < args.Length)
+        cliTlsKey = args[++i];
     else if (args[i] == "--rate-limit"   && i + 1 < args.Length)
         rateLimit = int.TryParse(args[++i], out var rl) ? rl : 60;
     else if (args[i] == "--log-level"   && i + 1 < args.Length)
@@ -184,6 +191,42 @@ if (!string.IsNullOrEmpty(cliCredentialsFile))
     };
 }
 
+// ── Validate TLS cert/key (optional) ──────────────────────────────────────────
+X509Certificate2? tlsCertificate = null;
+if (cliTlsCert != null || cliTlsKey != null)
+{
+    if (cliTlsCert is null || cliTlsKey is null)
+    {
+        AnsiConsole.MarkupLine("[red]Error:[/] --tls-cert and --tls-key must both be provided together.");
+        return 1;
+    }
+
+    var absCert = Path.GetFullPath(cliTlsCert);
+    var absKey  = Path.GetFullPath(cliTlsKey);
+
+    foreach (var (label, path) in new[] { ("--tls-cert", absCert), ("--tls-key", absKey) })
+    {
+        if (!File.Exists(path))
+        {
+            AnsiConsole.MarkupLine($"[red]Error:[/] {label} file not found: {Markup.Escape(path)}");
+            return 1;
+        }
+        try { _ = File.ReadAllBytes(path); }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]Error:[/] cannot read {label}: {Markup.Escape(ex.Message)}");
+            return 1;
+        }
+    }
+
+    try { tlsCertificate = X509Certificate2.CreateFromPemFile(absCert, absKey); }
+    catch (Exception ex)
+    {
+        AnsiConsole.MarkupLine($"[red]Error:[/] failed to load TLS certificate: {Markup.Escape(ex.Message)}");
+        return 1;
+    }
+}
+
 // ── Resolve LAN IPs ────────────────────────────────────────────────────────────
 var ips = NetworkInterface.GetAllNetworkInterfaces()
     .Where(n => n.OperationalStatus == OperationalStatus.Up
@@ -204,16 +247,20 @@ var panel = new Panel(
         (perSender    ? "[bold]Upload:[/]   Per-sender folders\n" : "") +
         (readOnly     ? "[bold yellow]Mode:[/]     Read-only (uploads disabled)\n" : "") +
         (logLevel != "info" ? $"[bold]Log:[/]      {logLevel}\n" : "") +
+        (tlsCertificate != null ? "[bold green]TLS:[/]      HTTPS enabled\n" : "") +
         (credWatcher is not null
             ? credWatcher.Current.Count > 0
-                ? $"[bold]Auth:[/]     {credWatcher.Current.Count} per-user credential{(credWatcher.Current.Count == 1 ? "" : "s")} loaded [yellow](HTTP — credentials unencrypted)[/]\n"
-                : "[bold yellow]Auth:[/]     Per-user credentials enforced (0 valid entries — all logins rejected) [yellow](HTTP — credentials unencrypted)[/]\n"
+                ? $"[bold]Auth:[/]     {credWatcher.Current.Count} per-user credential{(credWatcher.Current.Count == 1 ? "" : "s")} loaded" +
+                  (tlsCertificate is null ? " [yellow](HTTP — credentials unencrypted)[/]" : "") + "\n"
+                : "[bold yellow]Auth:[/]     Per-user credentials enforced (0 valid entries — all logins rejected)" +
+                  (tlsCertificate is null ? " [yellow](HTTP — credentials unencrypted)[/]" : "") + "\n"
             : "") +
         (!string.IsNullOrEmpty(password)
-            ? "[bold]Auth:[/]     Shared password required [yellow](HTTP — credentials unencrypted)[/]\n"
+            ? "[bold]Auth:[/]     Shared password required" +
+              (tlsCertificate is null ? " [yellow](HTTP — credentials unencrypted)[/]" : "") + "\n"
             : "") +
-        string.Join("\n", ips.Select(ip => $"[bold]URL:[/]      [link]http://{ip}:{port}[/]")) +
-        (ips.Count == 0 ? $"\n[bold]URL:[/]      http://localhost:{port}" : ""))))
+        string.Join("\n", ips.Select(ip => $"[bold]URL:[/]      [link]{(tlsCertificate != null ? "https" : "http")}://{ip}:{port}[/]")) +
+        (ips.Count == 0 ? $"\n[bold]URL:[/]      {(tlsCertificate != null ? "https" : "http")}://localhost:{port}" : ""))))
 {
     Header = new PanelHeader(" FileBeam is running ", Justify.Center),
     Border = BoxBorder.Rounded,
@@ -223,7 +270,8 @@ var panel = new Panel(
 AnsiConsole.Write(panel);
 
 // ── QR code for quick mobile access ──────────────────────────────────────────
-var qrUrl = ips.Count > 0 ? $"http://{ips[0]}:{port}" : $"http://localhost:{port}";
+var scheme = tlsCertificate != null ? "https" : "http";
+var qrUrl  = ips.Count > 0 ? $"{scheme}://{ips[0]}:{port}" : $"{scheme}://localhost:{port}";
 using var qrGen  = new QRCodeGenerator();
 var qrData       = qrGen.CreateQrCode(qrUrl, QRCodeGenerator.ECCLevel.L);
 var asciiQr      = new AsciiQRCode(qrData);
@@ -251,8 +299,12 @@ long? effectiveBodyLimit = maxUploadSize switch
 
 builder.WebHost.ConfigureKestrel(opts =>
 {
-    opts.Listen(IPAddress.Any, port);
     opts.Limits.MaxRequestBodySize = effectiveBodyLimit;
+    opts.Listen(IPAddress.Any, port, listenOpts =>
+    {
+        if (tlsCertificate != null)
+            listenOpts.UseHttps(tlsCertificate);
+    });
 });
 
 // Allow large multipart uploads (default is 30 MB)
