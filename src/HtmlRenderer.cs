@@ -119,6 +119,7 @@ public static class HtmlRenderer
             var href      = "/download/" + UrlPath(segments, file.Name);
             var deleteUrl = "/delete/"   + UrlPath(segments, file.Name);
             var renameUrl = "/rename/"   + UrlPath(segments, file.Name);
+            var shareUrl  = "/share/"    + UrlPath(segments, file.Name);
             var name      = HttpUtility.HtmlEncode(file.Name);
             var nameJs    = HttpUtility.JavaScriptStringEncode(file.Name);
             var size      = FormatSize(file.Length);
@@ -130,6 +131,7 @@ public static class HtmlRenderer
                       <td class="size">{size}</td>
                       <td class="modified">{modif}</td>
                       <td class="actions">
+                        <button class="act-btn" title="Share link" onclick="fbShare('{shareUrl}')">🔗</button>
                         <button class="act-btn" title="Rename" onclick="fbRename('{renameUrl}','{nameJs}')">✏️</button>
                         <button class="act-btn" title="Delete" onclick="fbDelete('{deleteUrl}','{name}')">🗑️</button>
                       </td>

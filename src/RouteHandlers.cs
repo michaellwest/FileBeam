@@ -82,11 +82,15 @@ public class RouteHandlers(
     int maxDirDepth = 10,
     int maxFilesPerDir = 1000,
     string csrfToken = "",
+    int shareTtlSeconds = 3600,
     Action<string, string>? debugLog = null)
 {
     // Tracks cumulative bytes uploaded per sender key (IP or username).
     // Best-effort only — not atomic across concurrent uploads from the same sender.
     private readonly ConcurrentDictionary<string, long> _senderQuotas = new();
+
+    // In-memory share token store: token → (resolved file path, expiry).
+    private readonly ConcurrentDictionary<string, (string FilePath, DateTimeOffset Expiry)> _shareTokens = new();
 
     private string SafeResolvePath(string? subpath)
     {
@@ -441,6 +445,59 @@ public class RouteHandlers(
         var parentSubpath = Path.GetDirectoryName(subpath)?.Replace('\\', '/');
         var browseUrl = string.IsNullOrEmpty(parentSubpath) ? "/" : $"/browse/{parentSubpath}";
         return Results.Redirect(browseUrl);
+    }
+
+    // POST /share/{**subpath}?ttl=<seconds>  — create a time-limited download token
+    public IResult CreateShareLink(HttpContext ctx, string? subpath)
+    {
+        if (string.IsNullOrEmpty(subpath))
+            return Results.BadRequest("No file specified.");
+
+        string resolved;
+        try { resolved = SafeResolvePath(subpath); }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        if (!File.Exists(resolved))
+            return Results.NotFound("File not found.");
+
+        var ttl = shareTtlSeconds;
+        if (ctx.Request.Query.TryGetValue("ttl", out var ttlStr)
+            && int.TryParse(ttlStr, out var parsedTtl) && parsedTtl > 0)
+            ttl = parsedTtl;
+
+        // Lazy eviction of expired tokens before inserting a new one
+        foreach (var key in _shareTokens.Keys.ToList())
+            if (_shareTokens.TryGetValue(key, out var t) && t.Expiry <= DateTimeOffset.UtcNow)
+                _shareTokens.TryRemove(key, out _);
+
+        var token = System.Security.Cryptography.RandomNumberGenerator.GetHexString(64, lowercase: true);
+        _shareTokens[token] = (resolved, DateTimeOffset.UtcNow.AddSeconds(ttl));
+
+        return Results.Json(new { url = $"/s/{token}", expiresIn = ttl });
+    }
+
+    // GET /s/{token}  — redeem a share token (no auth required)
+    public IResult RedeemShareLink(string? token)
+    {
+        if (string.IsNullOrEmpty(token) || !_shareTokens.TryGetValue(token, out var entry))
+            return Results.NotFound("Share link not found.");
+
+        if (entry.Expiry <= DateTimeOffset.UtcNow)
+        {
+            _shareTokens.TryRemove(token, out _);
+            return Results.StatusCode(StatusCodes.Status410Gone);
+        }
+
+        if (!File.Exists(entry.FilePath))
+        {
+            _shareTokens.TryRemove(token, out _);
+            return Results.NotFound("File no longer exists.");
+        }
+
+        var info   = new FileInfo(entry.FilePath);
+        var mime   = MimeTypes.GetMimeType(entry.FilePath);
+        var stream = new FileStream(entry.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
+        return Results.File(stream, mime, info.Name, enableRangeProcessing: true);
     }
 
     // GET /download-zip/{**subpath}
