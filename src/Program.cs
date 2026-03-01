@@ -23,6 +23,8 @@ long    maxUploadBytes      = 0;   // per-sender cumulative bytes; 0 = unlimited
 long?   maxUploadSize       = null; // null = keep large default; 0 = unlimited
 string? cliTlsCert          = null;
 string? cliTlsKey           = null;
+string? auditLogPath        = null;
+long    auditLogMaxSize     = 0;
 int     shareTtl            = 3600; // default share link TTL in seconds
 int     rateLimit           = 60;  // requests per minute per IP
 string  logLevel            = "info"; // info | debug
@@ -64,6 +66,10 @@ for (int i = 0; i < args.Length; i++)
         cliTlsKey = args[++i];
     else if (args[i] == "--share-ttl" && i + 1 < args.Length)
         shareTtl = int.TryParse(args[++i], out var st) && st > 0 ? st : 3600;
+    else if (args[i] == "--audit-log" && i + 1 < args.Length)
+        auditLogPath = args[++i];
+    else if (args[i] == "--audit-log-max-size" && i + 1 < args.Length)
+        auditLogMaxSize = long.TryParse(args[++i], out var als) ? als : 0;
     else if (args[i] == "--rate-limit"   && i + 1 < args.Length)
         rateLimit = int.TryParse(args[++i], out var rl) ? rl : 60;
     else if (args[i] == "--log-level"   && i + 1 < args.Length)
@@ -337,6 +343,14 @@ var app = builder.Build();
 // Wire up FileWatcher and route handlers
 using var fileWatcher = new FileWatcher(serveDir, maxSseConnections: 50);
 
+// ── Audit logger (optional) ───────────────────────────────────────────────────
+// --audit-log <path>  → log to file
+// --audit-log -       → log to stdout (mixed with console output)
+// (absent)            → no audit logging
+AuditLogger? auditLogger = auditLogPath is not null
+    ? new AuditLogger(auditLogPath == "-" ? null : auditLogPath, auditLogMaxSize)
+    : null;
+
 Action<string, string>? debugLog = logLevel == "debug"
     ? (reqId, msg) =>
       {
@@ -415,6 +429,38 @@ app.Use(async (ctx, next) =>
 
             AnsiConsole.MarkupLine(
                 $"[grey]{time}[/]  [grey][[INFO]][/]  [grey][[{requestId}]][/]  [{color}]{status}[/]  [bold]{method}[/]  {Markup.Escape(path)}{transfer}{exInfo}  [grey]{ip}  {sw.ElapsedMilliseconds}ms[/]");
+
+            // ── Audit log entry for file transfer actions ──────────────────────
+            if (auditLogger is not null && unhandled is null)
+            {
+                var auditAction = (method, path) switch
+                {
+                    ("GET",  var p) when p.StartsWith("/download/",     StringComparison.OrdinalIgnoreCase) => "download",
+                    ("POST", var p) when p.StartsWith("/upload/",       StringComparison.OrdinalIgnoreCase) => "upload",
+                    ("POST", var p) when p.StartsWith("/delete/",       StringComparison.OrdinalIgnoreCase) => "delete",
+                    ("POST", var p) when p.StartsWith("/rename/",       StringComparison.OrdinalIgnoreCase) => "rename",
+                    _ => null
+                };
+                if (auditAction is not null)
+                {
+                    // Extract Basic Auth username (if any); never log the password
+                    string? auditUser = null;
+                    var authHdr = ctx.Request.Headers.Authorization.ToString();
+                    if (authHdr.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
+                    {
+                        try
+                        {
+                            var decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(authHdr[6..]));
+                            var colon   = decoded.IndexOf(':');
+                            if (colon > 0) auditUser = decoded[..colon];
+                        }
+                        catch { /* malformed header */ }
+                    }
+
+                    var auditBytes = ctx.Items.TryGetValue("fb.bytes", out var ab) && ab is long lb ? lb : 0L;
+                    auditLogger.Log(time, auditUser, ip, auditAction, path, auditBytes, status);
+                }
+            }
         }
     }
 });
@@ -561,5 +607,9 @@ app.MapPost("/mkdir/{**subpath}",   handlers.MkDir);
 app.MapGet("/events",               handlers.FileEvents);
 
 try   { await app.RunAsync(); }
-finally { credWatcher?.Dispose(); }
+finally
+{
+    credWatcher?.Dispose();
+    if (auditLogger is not null) await auditLogger.DisposeAsync();
+}
 return 0;
