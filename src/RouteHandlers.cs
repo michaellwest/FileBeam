@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO.Compression;
 using System.Text;
 using System.Threading.Channels;
 using System.Web;
@@ -424,6 +425,34 @@ public class RouteHandlers(
         var parentSubpath = Path.GetDirectoryName(subpath)?.Replace('\\', '/');
         var browseUrl = string.IsNullOrEmpty(parentSubpath) ? "/" : $"/browse/{parentSubpath}";
         return Results.Redirect(browseUrl);
+    }
+
+    // GET /download-zip/{**subpath}
+    public IResult DownloadZip(string? subpath)
+    {
+        string resolved;
+        try { resolved = SafeResolvePath(subpath); }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        if (!Directory.Exists(resolved))
+            return Results.NotFound("Directory not found.");
+
+        var folderName = string.IsNullOrEmpty(subpath)
+            ? Path.GetFileName(rootDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+            : Path.GetFileName(resolved.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+        return Results.Stream(async stream =>
+        {
+            using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
+            foreach (var file in Directory.EnumerateFiles(resolved, "*", SearchOption.AllDirectories))
+            {
+                var entryName = Path.GetRelativePath(resolved, file).Replace('\\', '/');
+                var entry     = archive.CreateEntry(entryName, CompressionLevel.Fastest);
+                await using var entryStream = entry.Open();
+                await using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
+                await fs.CopyToAsync(entryStream);
+            }
+        }, "application/zip", $"{folderName}.zip");
     }
 
     // POST /mkdir/{**subpath}

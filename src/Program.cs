@@ -434,7 +434,8 @@ app.Use(async (ctx, next) =>
 
 app.MapGet("/",                     handlers.ListDirectory);
 app.MapGet("/browse/{**subpath}",   handlers.BrowseDirectory);
-app.MapGet("/download/{**subpath}", handlers.DownloadFile);
+app.MapGet("/download/{**subpath}",     handlers.DownloadFile);
+app.MapGet("/download-zip/{**subpath}", handlers.DownloadZip);
 app.MapPost("/upload/{**subpath}",  handlers.UploadFiles);
 app.MapPost("/delete/{**subpath}",  handlers.DeleteFile);
 app.MapPost("/rename/{**subpath}",  handlers.RenameFile);

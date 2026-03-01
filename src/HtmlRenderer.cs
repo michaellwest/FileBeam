@@ -77,15 +77,16 @@ public static class HtmlRenderer
         // Subdirectories
         foreach (var dir in dirs)
         {
-            var href  = "/browse/" + UrlPath(segments, dir.Name);
-            var name  = HttpUtility.HtmlEncode(dir.Name);
-            var modif = dir.LastWriteTime.ToString("yyyy-MM-dd HH:mm");
+            var href   = "/browse/"       + UrlPath(segments, dir.Name);
+            var zipUrl = "/download-zip/" + UrlPath(segments, dir.Name);
+            var name   = HttpUtility.HtmlEncode(dir.Name);
+            var modif  = dir.LastWriteTime.ToString("yyyy-MM-dd HH:mm");
             sb.AppendLine($"""
                     <tr>
                       <td><a href="{href}" class="name"><span class="icon">📁</span>{name}/</a></td>
                       <td class="size">—</td>
                       <td class="modified">{modif}</td>
-                      <td class="actions"></td>
+                      <td class="actions"><a href="{zipUrl}" class="act-btn" title="Download as ZIP">⬇️</a></td>
                     </tr>
                 """);
         }
