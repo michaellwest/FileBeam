@@ -289,6 +289,55 @@ public sealed class RouteHandlersTests : IDisposable
         Assert.Equal(400, StatusCode(result));
     }
 
+    // ── DownloadZip ───────────────────────────────────────────────────────────
+
+    [Fact]
+    public void DownloadZip_DirectoryNotFound_Returns404()
+    {
+        var result = _handlers.DownloadZip("nonexistent");
+        Assert.Equal(404, StatusCode(result));
+    }
+
+    [Theory]
+    [InlineData("../escape")]
+    [InlineData("../../etc")]
+    public void DownloadZip_PathTraversal_Returns403(string subpath)
+    {
+        var result = _handlers.DownloadZip(subpath);
+        Assert.Equal(403, StatusCode(result));
+    }
+
+    [Fact]
+    public async Task DownloadZip_EmptyDirectory_Returns200WithZip()
+    {
+        var dir = Directory.CreateDirectory(Path.Combine(_rootDir, "emptydir")).FullName;
+
+        var ctx = MakeContext();
+        var result = _handlers.DownloadZip("emptydir");
+        await result.ExecuteAsync(ctx);
+
+        Assert.Equal(200, ctx.Response.StatusCode);
+        Assert.Equal("application/zip", ctx.Response.ContentType);
+    }
+
+    [Fact]
+    public async Task DownloadZip_DirectoryWithFiles_ZipContainsFiles()
+    {
+        var sub = Directory.CreateDirectory(Path.Combine(_rootDir, "zipme")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(sub, "a.txt"), "hello");
+        await File.WriteAllTextAsync(Path.Combine(sub, "b.txt"), "world");
+
+        var ctx = MakeContext();
+        var result = _handlers.DownloadZip("zipme");
+        await result.ExecuteAsync(ctx);
+
+        ctx.Response.Body.Seek(0, SeekOrigin.Begin);
+        using var archive = new System.IO.Compression.ZipArchive(ctx.Response.Body, System.IO.Compression.ZipArchiveMode.Read, leaveOpen: true);
+        var entries = archive.Entries.Select(e => e.FullName).ToHashSet();
+        Assert.Contains("a.txt", entries);
+        Assert.Contains("b.txt", entries);
+    }
+
     // ── MkDir ─────────────────────────────────────────────────────────────────
 
     [Fact]
