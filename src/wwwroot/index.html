@@ -23,6 +23,7 @@
       margin-bottom: 1.5rem;
     }
     header h1 { font-size: 1.4rem; font-weight: 700; color: #5ba4f5; }
+    .role-wo .breadcrumb, .role-wo table { display: none; }
     #disk-info { margin-left: auto; display: flex; align-items: center; gap: 0.5rem; font-size: 0.78rem; color: #888; }
     #disk-track { width: 100px; height: 7px; background: #2a2d3e; border-radius: 4px; overflow: hidden; }
     #disk-fill  { height: 100%; border-radius: 4px; transition: width 0.3s; }
@@ -170,7 +171,7 @@
     }
   </style>
 </head>
-<body>
+<body class="{{BODY_CLASS}}">
 <header>
   <h1>⚡ FileBeam</h1>
   <div id="disk-info"></div>

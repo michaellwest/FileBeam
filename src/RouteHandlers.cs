@@ -188,6 +188,13 @@ public class RouteHandlers(
     }
 
     /// <summary>
+    /// Returns the role attached to this request by the auth middleware.
+    /// Defaults to <c>"rw"</c> when no role is present (unauthenticated or shared-password).
+    /// </summary>
+    private static string GetRole(HttpContext ctx) =>
+        ctx.Items.TryGetValue("fb.role", out var r) && r is string s ? s : "rw";
+
+    /// <summary>
     /// Returns the total byte size of all files under <paramref name="dir"/> recursively.
     /// Inaccessible files are skipped so the count is best-effort.
     /// </summary>
@@ -223,6 +230,15 @@ public class RouteHandlers(
 
     private IResult Browse(HttpContext ctx, string? subpath)
     {
+        var role = GetRole(ctx);
+
+        // Write-only users see the root upload drop zone regardless of the path they visited.
+        if (role == "wo")
+        {
+            var woHtml = HtmlRenderer.RenderDirectory("", [], [], isReadOnly, csrfToken, "name", "asc", role);
+            return Results.Content(woHtml, "text/html");
+        }
+
         string resolved;
         try { resolved = SafeResolvePath(subpath); }
         catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
@@ -252,13 +268,16 @@ public class RouteHandlers(
             _      => desc ? files.OrderByDescending(f => f.Name)          : files.OrderBy(f => f.Name)
         };
 
-        var html = HtmlRenderer.RenderDirectory(relPath, dirs.ToList(), files.ToList(), isReadOnly, csrfToken, sort, order);
+        var html = HtmlRenderer.RenderDirectory(relPath, dirs.ToList(), files.ToList(), isReadOnly, csrfToken, sort, order, role);
         return Results.Content(html, "text/html");
     }
 
     // GET /download/{**subpath}
     public IResult DownloadFile(HttpContext ctx, string? subpath)
     {
+        if (GetRole(ctx) == "wo")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
         if (string.IsNullOrEmpty(subpath))
             return Results.BadRequest("No file specified.");
 
@@ -288,6 +307,9 @@ public class RouteHandlers(
     {
         if (isReadOnly)
             return Results.StatusCode(StatusCodes.Status405MethodNotAllowed);
+
+        if (GetRole(ctx) == "ro")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
 
         // Uploads land in uploadDir (private when separate from rootDir).
         // With --per-sender, each sender gets their own subfolder named after their
@@ -432,8 +454,11 @@ public class RouteHandlers(
     }
 
     // POST /delete/{**subpath}
-    public IResult DeleteFile(string? subpath)
+    public IResult DeleteFile(HttpContext ctx, string? subpath)
     {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
         if (string.IsNullOrEmpty(subpath))
             return Results.BadRequest("No file specified.");
 
@@ -454,6 +479,9 @@ public class RouteHandlers(
     // POST /rename/{**subpath}
     public async Task<IResult> RenameFile(HttpContext ctx, string? subpath)
     {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
         if (string.IsNullOrEmpty(subpath))
             return Results.BadRequest("No file specified.");
 
@@ -483,6 +511,9 @@ public class RouteHandlers(
     // POST /share/{**subpath}?ttl=<seconds>  — create a time-limited download token
     public IResult CreateShareLink(HttpContext ctx, string? subpath)
     {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
         if (string.IsNullOrEmpty(subpath))
             return Results.BadRequest("No file specified.");
 
@@ -534,8 +565,11 @@ public class RouteHandlers(
     }
 
     // GET /download-zip/{**subpath}
-    public IResult DownloadZip(string? subpath)
+    public IResult DownloadZip(HttpContext ctx, string? subpath)
     {
+        if (GetRole(ctx) == "wo")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
         string resolved;
         try { resolved = SafeResolvePath(subpath); }
         catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
@@ -566,6 +600,9 @@ public class RouteHandlers(
     {
         if (isReadOnly)
             return Results.StatusCode(StatusCodes.Status405MethodNotAllowed);
+
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
 
         if (string.IsNullOrEmpty(subpath))
             return Results.BadRequest("No folder name specified.");

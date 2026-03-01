@@ -55,9 +55,26 @@ public sealed class RouteHandlersTests : IDisposable
         return ctx.Response.StatusCode;
     }
 
+    private DefaultHttpContext MakeAdminContext()
+    {
+        var ctx = MakeContext();
+        ctx.Items["fb.role"] = "admin";
+        return ctx;
+    }
+
     private DefaultHttpContext MakeFormContext(string urlEncodedBody)
     {
         var ctx   = MakeContext();
+        var bytes = Encoding.UTF8.GetBytes(urlEncodedBody);
+        ctx.Request.Body          = new MemoryStream(bytes);
+        ctx.Request.ContentType   = "application/x-www-form-urlencoded";
+        ctx.Request.ContentLength = bytes.Length;
+        return ctx;
+    }
+
+    private DefaultHttpContext MakeAdminFormContext(string urlEncodedBody)
+    {
+        var ctx = MakeAdminContext();
         var bytes = Encoding.UTF8.GetBytes(urlEncodedBody);
         ctx.Request.Body          = new MemoryStream(bytes);
         ctx.Request.ContentType   = "application/x-www-form-urlencoded";
@@ -229,14 +246,14 @@ public sealed class RouteHandlersTests : IDisposable
     [Fact]
     public void DeleteFile_NoSubpath_Returns400()
     {
-        var result = _handlers.DeleteFile(null);
+        var result = _handlers.DeleteFile(MakeAdminContext(), null);
         Assert.Equal(400, StatusCode(result));
     }
 
     [Fact]
     public void DeleteFile_FileNotFound_Returns404()
     {
-        var result = _handlers.DeleteFile("missing.txt");
+        var result = _handlers.DeleteFile(MakeAdminContext(), "missing.txt");
         Assert.Equal(404, StatusCode(result));
     }
 
@@ -245,7 +262,7 @@ public sealed class RouteHandlersTests : IDisposable
     [InlineData("../../etc/shadow")]
     public void DeleteFile_PathTraversal_Returns403(string subpath)
     {
-        var result = _handlers.DeleteFile(subpath);
+        var result = _handlers.DeleteFile(MakeAdminContext(), subpath);
         Assert.Equal(403, StatusCode(result));
     }
 
@@ -255,8 +272,8 @@ public sealed class RouteHandlersTests : IDisposable
         var file = Path.Combine(_rootDir, "todelete.txt");
         await File.WriteAllTextAsync(file, "bye");
 
-        var ctx = MakeContext();
-        await _handlers.DeleteFile("todelete.txt").ExecuteAsync(ctx);
+        var ctx = MakeAdminContext();
+        await _handlers.DeleteFile(ctx, "todelete.txt").ExecuteAsync(ctx);
 
         Assert.Equal(302, ctx.Response.StatusCode);
         Assert.False(File.Exists(file));
@@ -270,8 +287,8 @@ public sealed class RouteHandlersTests : IDisposable
         var file = Path.Combine(subdir, "nested.txt");
         await File.WriteAllTextAsync(file, "content");
 
-        var ctx = MakeContext();
-        await _handlers.DeleteFile("sub/nested.txt").ExecuteAsync(ctx);
+        var ctx = MakeAdminContext();
+        await _handlers.DeleteFile(ctx, "sub/nested.txt").ExecuteAsync(ctx);
 
         Assert.Equal(302, ctx.Response.StatusCode);
         Assert.Contains("/browse/sub", ctx.Response.Headers.Location.ToString());
@@ -294,14 +311,14 @@ public sealed class RouteHandlersTests : IDisposable
     [Fact]
     public async Task RenameFile_NoSubpath_Returns400()
     {
-        var result = await _handlers.RenameFile(MakeContext(), null);
+        var result = await _handlers.RenameFile(MakeAdminContext(), null);
         Assert.Equal(400, StatusCode(result));
     }
 
     [Fact]
     public async Task RenameFile_FileNotFound_Returns404()
     {
-        var result = await _handlers.RenameFile(MakeFormContext("newname=newfile.txt"), "missing.txt");
+        var result = await _handlers.RenameFile(MakeAdminFormContext("newname=newfile.txt"), "missing.txt");
         Assert.Equal(404, StatusCode(result));
     }
 
@@ -310,7 +327,7 @@ public sealed class RouteHandlersTests : IDisposable
     [InlineData("../../etc/passwd")]
     public async Task RenameFile_PathTraversal_Returns403(string subpath)
     {
-        var result = await _handlers.RenameFile(MakeFormContext("newname=newfile.txt"), subpath);
+        var result = await _handlers.RenameFile(MakeAdminFormContext("newname=newfile.txt"), subpath);
         Assert.Equal(403, StatusCode(result));
     }
 
@@ -319,7 +336,7 @@ public sealed class RouteHandlersTests : IDisposable
     {
         await File.WriteAllTextAsync(Path.Combine(_rootDir, "original.txt"), "data");
 
-        var ctx    = MakeFormContext("newname=renamed.txt");
+        var ctx    = MakeAdminFormContext("newname=renamed.txt");
         var result = await _handlers.RenameFile(ctx, "original.txt");
 
         Assert.Equal(302, await ExecuteAsync(result));
@@ -333,7 +350,7 @@ public sealed class RouteHandlersTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(_rootDir, "a.txt"), "a");
         await File.WriteAllTextAsync(Path.Combine(_rootDir, "b.txt"), "b");
 
-        var result = await _handlers.RenameFile(MakeFormContext("newname=b.txt"), "a.txt");
+        var result = await _handlers.RenameFile(MakeAdminFormContext("newname=b.txt"), "a.txt");
         Assert.Equal(409, StatusCode(result));
     }
 
@@ -342,7 +359,7 @@ public sealed class RouteHandlersTests : IDisposable
     {
         await File.WriteAllTextAsync(Path.Combine(_rootDir, "file.txt"), "data");
 
-        var result = await _handlers.RenameFile(MakeFormContext("newname="), "file.txt");
+        var result = await _handlers.RenameFile(MakeAdminFormContext("newname="), "file.txt");
         Assert.Equal(400, StatusCode(result));
     }
 
@@ -351,14 +368,14 @@ public sealed class RouteHandlersTests : IDisposable
     [Fact]
     public void CreateShareLink_NoSubpath_Returns400()
     {
-        var result = _handlers.CreateShareLink(MakeContext(), null);
+        var result = _handlers.CreateShareLink(MakeAdminContext(), null);
         Assert.Equal(400, StatusCode(result));
     }
 
     [Fact]
     public void CreateShareLink_FileNotFound_Returns404()
     {
-        var result = _handlers.CreateShareLink(MakeContext(), "missing.txt");
+        var result = _handlers.CreateShareLink(MakeAdminContext(), "missing.txt");
         Assert.Equal(404, StatusCode(result));
     }
 
@@ -366,7 +383,7 @@ public sealed class RouteHandlersTests : IDisposable
     [InlineData("../escape.txt")]
     public void CreateShareLink_PathTraversal_Returns403(string subpath)
     {
-        var result = _handlers.CreateShareLink(MakeContext(), subpath);
+        var result = _handlers.CreateShareLink(MakeAdminContext(), subpath);
         Assert.Equal(403, StatusCode(result));
     }
 
@@ -374,7 +391,7 @@ public sealed class RouteHandlersTests : IDisposable
     public async Task CreateShareLink_ValidFile_Returns200WithUrl()
     {
         await File.WriteAllTextAsync(Path.Combine(_rootDir, "shared.txt"), "hello");
-        var body = await ReadBodyAsync(_handlers.CreateShareLink(MakeContext(), "shared.txt"));
+        var body = await ReadBodyAsync(_handlers.CreateShareLink(MakeAdminContext(), "shared.txt"));
         Assert.Contains("/s/", body);
     }
 
@@ -389,7 +406,7 @@ public sealed class RouteHandlersTests : IDisposable
     public async Task RedeemShareLink_ValidToken_ServesFile()
     {
         await File.WriteAllTextAsync(Path.Combine(_rootDir, "download.txt"), "content");
-        var body = await ReadBodyAsync(_handlers.CreateShareLink(MakeContext(), "download.txt"));
+        var body = await ReadBodyAsync(_handlers.CreateShareLink(MakeAdminContext(), "download.txt"));
         var token = System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("url").GetString()!.Split('/')[^1];
 
         var result = _handlers.RedeemShareLink(token);
@@ -400,7 +417,7 @@ public sealed class RouteHandlersTests : IDisposable
     public async Task CreateShareLink_IncludesExpiresIn()
     {
         await File.WriteAllTextAsync(Path.Combine(_rootDir, "timed.txt"), "data");
-        var ctx = MakeContext();
+        var ctx = MakeAdminContext();
         ctx.Request.QueryString = new QueryString("?ttl=120");
         var body = await ReadBodyAsync(_handlers.CreateShareLink(ctx, "timed.txt"));
         var doc  = System.Text.Json.JsonDocument.Parse(body).RootElement;
@@ -412,7 +429,7 @@ public sealed class RouteHandlersTests : IDisposable
     [Fact]
     public void DownloadZip_DirectoryNotFound_Returns404()
     {
-        var result = _handlers.DownloadZip("nonexistent");
+        var result = _handlers.DownloadZip(MakeContext(), "nonexistent");
         Assert.Equal(404, StatusCode(result));
     }
 
@@ -421,7 +438,7 @@ public sealed class RouteHandlersTests : IDisposable
     [InlineData("../../etc")]
     public void DownloadZip_PathTraversal_Returns403(string subpath)
     {
-        var result = _handlers.DownloadZip(subpath);
+        var result = _handlers.DownloadZip(MakeContext(), subpath);
         Assert.Equal(403, StatusCode(result));
     }
 
@@ -431,7 +448,7 @@ public sealed class RouteHandlersTests : IDisposable
         var dir = Directory.CreateDirectory(Path.Combine(_rootDir, "emptydir")).FullName;
 
         var ctx = MakeContext();
-        var result = _handlers.DownloadZip("emptydir");
+        var result = _handlers.DownloadZip(ctx, "emptydir");
         await result.ExecuteAsync(ctx);
 
         Assert.Equal(200, ctx.Response.StatusCode);
@@ -446,7 +463,7 @@ public sealed class RouteHandlersTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(sub, "b.txt"), "world");
 
         var ctx = MakeContext();
-        var result = _handlers.DownloadZip("zipme");
+        var result = _handlers.DownloadZip(ctx, "zipme");
         await result.ExecuteAsync(ctx);
 
         ctx.Response.Body.Seek(0, SeekOrigin.Begin);
@@ -461,7 +478,7 @@ public sealed class RouteHandlersTests : IDisposable
     [Fact]
     public void MkDir_NoSubpath_Returns400()
     {
-        var result = _handlers.MkDir(MakeContext(), null);
+        var result = _handlers.MkDir(MakeAdminContext(), null);
         Assert.Equal(400, StatusCode(result));
     }
 
@@ -476,7 +493,7 @@ public sealed class RouteHandlersTests : IDisposable
     [Fact]
     public async Task MkDir_NewFolder_CreatesDirectoryAndRedirects()
     {
-        var ctx = MakeContext();
+        var ctx = MakeAdminContext();
         var result = _handlers.MkDir(ctx, "newfolder");
 
         Assert.Equal(302, await ExecuteAsync(result));
@@ -487,7 +504,7 @@ public sealed class RouteHandlersTests : IDisposable
     public async Task MkDir_NestedFolder_RedirectsToBrowsePath()
     {
         Directory.CreateDirectory(Path.Combine(_rootDir, "docs"));
-        var ctx = MakeContext();
+        var ctx = MakeAdminContext();
         var result = _handlers.MkDir(ctx, "docs/reports");
 
         await result.ExecuteAsync(ctx);
@@ -500,14 +517,14 @@ public sealed class RouteHandlersTests : IDisposable
     public void MkDir_AlreadyExists_Returns409()
     {
         Directory.CreateDirectory(Path.Combine(_rootDir, "existing"));
-        var result = _handlers.MkDir(MakeContext(), "existing");
+        var result = _handlers.MkDir(MakeAdminContext(), "existing");
         Assert.Equal(409, StatusCode(result));
     }
 
     [Fact]
     public void MkDir_MissingParent_Returns404()
     {
-        var result = _handlers.MkDir(MakeContext(), "nonexistent/child");
+        var result = _handlers.MkDir(MakeAdminContext(), "nonexistent/child");
         Assert.Equal(404, StatusCode(result));
     }
 
@@ -516,7 +533,7 @@ public sealed class RouteHandlersTests : IDisposable
     [InlineData("../../etc")]
     public void MkDir_PathTraversal_Returns403(string subpath)
     {
-        var result = _handlers.MkDir(MakeContext(), subpath);
+        var result = _handlers.MkDir(MakeAdminContext(), subpath);
         Assert.Equal(403, StatusCode(result));
     }
 }

@@ -12,16 +12,27 @@ public static class HtmlRenderer
         bool isReadOnly = false,
         string csrfToken = "",
         string sort = "name",
-        string order = "asc")
+        string order = "asc",
+        string role = "rw")
     {
-        var segments      = relPath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
-        var uploadSection = isReadOnly ? "" : BuildUploadSection(segments);
+        var segments = relPath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+
+        // wo = upload-only: show drop zone at root, no listing.
+        // Uploads always target root regardless of which URL was visited.
+        var isWo = role == "wo";
+
+        var canUpload    = !isReadOnly && role != "ro";
+        var isAdmin      = role == "admin";
+        var uploadSegs   = isWo ? [] : segments;   // wo users always upload to root
+        var uploadSection = canUpload ? BuildUploadSection(uploadSegs, isAdmin) : "";
+        var bodyClass    = isWo ? "role-wo" : "";
 
         return ResourceLoader.Template
             .Replace("{{PAGE_TITLE}}",      HttpUtility.HtmlEncode(relPath))
+            .Replace("{{BODY_CLASS}}",      bodyClass)
             .Replace("{{BREADCRUMB}}",      BuildBreadcrumb(segments))
             .Replace("{{THEAD}}",           BuildTHead(sort, order))
-            .Replace("{{ROWS}}",            BuildRows(segments, dirs, files))
+            .Replace("{{ROWS}}",            BuildRows(segments, dirs, files, isAdmin))
             .Replace("{{UPLOAD_SECTION}}", uploadSection)
             .Replace("{{CSRF_TOKEN}}",      HttpUtility.HtmlAttributeEncode(csrfToken))
             .Replace("{{APP_JS}}",          ResourceLoader.AppJs);
@@ -46,7 +57,7 @@ public static class HtmlRenderer
         """;
     }
 
-    private static string BuildUploadSection(string[] segments)
+    private static string BuildUploadSection(string[] segments, bool isAdmin = false)
     {
         var uploadAction = segments.Length == 0
             ? "/upload/"
@@ -54,6 +65,14 @@ public static class HtmlRenderer
 
         var mkdirBase = System.Web.HttpUtility.JavaScriptStringEncode(
             segments.Length == 0 ? "" : string.Join("/", segments.Select(Uri.EscapeDataString)));
+
+        var mkdirButton = isAdmin
+            ? $"""
+              <div style="margin-top:0.75rem">
+                <button class="btn btn-secondary" onclick="fbMkDir('{mkdirBase}')">📁 New Folder</button>
+              </div>
+              """
+            : "";
 
         return $"""
             <div class="upload-section">
@@ -67,9 +86,7 @@ public static class HtmlRenderer
                 <div id="upload-queue" hidden></div>
                 <button type="submit" class="btn">Upload</button>
               </form>
-              <div style="margin-top:0.75rem">
-                <button class="btn btn-secondary" onclick="fbMkDir('{mkdirBase}')">📁 New Folder</button>
-              </div>
+              {mkdirButton}
             </div>
             """;
     }
@@ -79,7 +96,8 @@ public static class HtmlRenderer
     private static string BuildRows(
         string[] segments,
         List<DirectoryInfo> dirs,
-        List<FileInfo> files)
+        List<FileInfo> files,
+        bool isAdmin = false)
     {
         var sb = new StringBuilder();
 
@@ -126,6 +144,13 @@ public static class HtmlRenderer
             var size      = FormatSize(file.Length);
             var modif     = file.LastWriteTime.ToString("yyyy-MM-dd HH:mm");
             var icon      = FileIcon(file.Extension);
+            var adminButtons = isAdmin
+                ? $"""
+                        <button class="act-btn" title="Share link" onclick="fbShare('{shareUrl}')">🔗</button>
+                        <button class="act-btn" title="Rename" onclick="fbRename('{renameUrl}','{nameJs}')">✏️</button>
+                        <button class="act-btn" title="Delete" onclick="fbDelete('{deleteUrl}','{name}')">🗑️</button>
+                  """
+                : "";
             sb.AppendLine($"""
                     <tr>
                       <td><a href="{href}" class="name"><span class="icon">{icon}</span>{name}</a></td>
@@ -133,9 +158,7 @@ public static class HtmlRenderer
                       <td class="modified">{modif}</td>
                       <td class="actions">
                         <button class="act-btn" title="Preview" onclick="fbPreview('{href}','{nameJs}','{extJs}')">👁️</button>
-                        <button class="act-btn" title="Share link" onclick="fbShare('{shareUrl}')">🔗</button>
-                        <button class="act-btn" title="Rename" onclick="fbRename('{renameUrl}','{nameJs}')">✏️</button>
-                        <button class="act-btn" title="Delete" onclick="fbDelete('{deleteUrl}','{name}')">🗑️</button>
+                        {adminButtons}
                       </td>
                     </tr>
                 """);

@@ -118,7 +118,7 @@ function markFailed(row, bar, status, btn, file, httpStatus = 0) {
 
 function checkDone() {
   if (activeUploads === 0 && pendingRetries === 0 && anySucceeded)
-    setTimeout(() => window.location.reload(), 800);
+    setTimeout(() => window.location.reload(), 2500);
 }
 
 // Upload form / drop-zone event listeners (null-guarded: absent in ReadOnly mode)
