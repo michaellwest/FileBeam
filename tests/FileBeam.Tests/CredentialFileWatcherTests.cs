@@ -26,12 +26,12 @@ public sealed class CredentialFileWatcherTests : IDisposable
     /// Waits up to <paramref name="timeoutMs"/> ms for the <see cref="CredentialFileWatcher.Reloaded"/>
     /// event to fire, then returns the new credential snapshot.
     /// </summary>
-    private static Task<IReadOnlyDictionary<string, string>> WaitForReload(
+    private static Task<IReadOnlyDictionary<string, UserCredential>> WaitForReload(
         CredentialFileWatcher watcher, int timeoutMs = 2000)
     {
-        var tcs = new TaskCompletionSource<IReadOnlyDictionary<string, string>>();
+        var tcs = new TaskCompletionSource<IReadOnlyDictionary<string, UserCredential>>();
 
-        void Handler(IReadOnlyDictionary<string, string> creds)
+        void Handler(IReadOnlyDictionary<string, UserCredential> creds)
         {
             watcher.Reloaded -= Handler;
             tcs.TrySetResult(creds);
@@ -56,8 +56,8 @@ public sealed class CredentialFileWatcherTests : IDisposable
         using var watcher = new CredentialFileWatcher(CredPath());
 
         Assert.Equal(2, watcher.Current.Count);
-        Assert.Equal("secret",  watcher.Current["alice"]);
-        Assert.Equal("hunter2", watcher.Current["bob"]);
+        Assert.Equal("secret",  watcher.Current["alice"].Password);
+        Assert.Equal("hunter2", watcher.Current["bob"].Password);
     }
 
     [Fact]
@@ -81,9 +81,9 @@ public sealed class CredentialFileWatcherTests : IDisposable
 
         var creds = await reloadTask;
 
-        Assert.Equal(2,       creds.Count);
-        Assert.Equal("pass2", creds["alice"]);
-        Assert.Equal("newpass", creds["bob"]);
+        Assert.Equal(2,         creds.Count);
+        Assert.Equal("pass2",   creds["alice"].Password);
+        Assert.Equal("newpass", creds["bob"].Password);
     }
 
     [Fact]
@@ -96,7 +96,7 @@ public sealed class CredentialFileWatcherTests : IDisposable
         File.WriteAllText(CredPath(), "alice:new\n");
         await reloadTask;
 
-        Assert.Equal("new", watcher.Current["alice"]);
+        Assert.Equal("new", watcher.Current["alice"].Password);
     }
 
     // ── File deletion ─────────────────────────────────────────────────────────
@@ -129,7 +129,7 @@ public sealed class CredentialFileWatcherTests : IDisposable
         var creds = await reloadTask;
 
         Assert.Single(creds);
-        Assert.Equal("mypass", creds["carol"]);
+        Assert.Equal("mypass", creds["carol"].Password);
     }
 
     // ── Thread safety ─────────────────────────────────────────────────────────

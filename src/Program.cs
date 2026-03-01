@@ -213,7 +213,7 @@ if (!string.IsNullOrEmpty(cliCredentialsFile))
     // Log every hot-reload to the console
     credWatcher.Reloaded += creds =>
     {
-        var t = DateTime.UtcNow.ToString("o");
+        var t = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
         if (creds.Count == 0)
             AnsiConsole.MarkupLine($"[grey]{t}[/]  [yellow][[WARN]][/]  credentials file unloaded — all per-user logins rejected");
         else
@@ -377,7 +377,7 @@ AuditLogger? auditLogger = auditLogPath is not null
 Action<string, string>? debugLog = logLevel == "debug"
     ? (reqId, msg) =>
       {
-          var t = DateTime.UtcNow.ToString("o");
+          var t = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
           AnsiConsole.MarkupLine($"[grey]{t}[/]  [dim][[DBG]][/]   [grey][[{reqId}]][/]  [grey]---[/]  [grey]---[/]  {Markup.Escape(msg)}");
       }
     : null;
@@ -411,7 +411,7 @@ app.Use(async (ctx, next) =>
     {
         var startIp   = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
         var startPath = ctx.Request.Path.Value ?? "/";
-        var startTime = DateTime.UtcNow.ToString("o");
+        var startTime = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
         AnsiConsole.MarkupLine(
             $"[grey]{startTime}[/]  [blue][[INFO]][/]  [grey][[{requestId}]][/]  [grey]---[/]  [bold]POST[/]  {Markup.Escape(startPath)}  [grey]{startIp}  uploading…[/]");
     }
@@ -432,7 +432,7 @@ app.Use(async (ctx, next) =>
             var path   = ctx.Request.Path.Value ?? "/";
             var status = unhandled is not null ? 500 : ctx.Response.StatusCode;
             var color  = status >= 400 ? "red" : status >= 300 ? "yellow" : "green";
-            var time   = DateTime.UtcNow.ToString("o");
+            var time   = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
 
             // Build optional transfer info suffix (file name + size for uploads/downloads)
             string transfer = "";
@@ -555,12 +555,18 @@ if (authRequired)
 
                     // 1. Check per-user credentials (username AND password must match).
                     //    Read Current snapshot once — it may be hot-swapped by the file watcher.
-                    if (credWatcher?.Current.TryGetValue(submittedUser, out var expectedPass) == true)
-                        authenticated = CredentialStore.VerifyPassword(submittedPass, expectedPass);
+                    if (credWatcher?.Current.TryGetValue(submittedUser, out var userCred) == true)
+                    {
+                        authenticated = CredentialStore.VerifyPassword(submittedPass, userCred.Password);
+                        if (authenticated) ctx.Items["fb.role"] = userCred.Role;
+                    }
 
-                    // 2. Fall back to shared password (any username accepted)
+                    // 2. Fall back to shared password (any username accepted) — role is rw
                     if (!authenticated && !string.IsNullOrEmpty(password))
+                    {
                         authenticated = CredentialStore.VerifyPassword(submittedPass, password);
+                        if (authenticated) ctx.Items["fb.role"] = "rw";
+                    }
                 }
             }
             catch { /* malformed Base64 — fall through to 401 */ }

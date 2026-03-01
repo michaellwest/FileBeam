@@ -45,19 +45,69 @@ public sealed class CredentialStoreTests : IDisposable
         var creds = CredentialStore.LoadFile(path);
 
         Assert.Equal(2, creds.Count);
-        Assert.Equal("secret",  creds["alice"]);
-        Assert.Equal("hunter2", creds["bob"]);
+        Assert.Equal("secret",  creds["alice"].Password);
+        Assert.Equal("hunter2", creds["bob"].Password);
     }
 
     [Fact]
-    public void LoadFile_PasswordWithColons_UsesFirstColonOnly()
+    public void LoadFile_NoRole_DefaultsToRw()
     {
-        // Password itself contains a colon — everything after the first colon is the password.
-        var path = WriteFile("alice:pass:word:extra\n");
-        var creds = CredentialStore.LoadFile(path);
+        var path = WriteFile("alice:secret\n");
+        Assert.Equal("rw", CredentialStore.LoadFile(path)["alice"].Role);
+    }
 
-        Assert.Single(creds);
-        Assert.Equal("pass:word:extra", creds["alice"]);
+    [Fact]
+    public void LoadFile_AdminRole_Parsed()
+    {
+        var path = WriteFile("alice:secret:admin\n");
+        var cred = CredentialStore.LoadFile(path)["alice"];
+        Assert.Equal("secret", cred.Password);
+        Assert.Equal("admin",  cred.Role);
+    }
+
+    [Fact]
+    public void LoadFile_RoRole_Parsed()
+    {
+        var path = WriteFile("carol:pass:ro\n");
+        var cred = CredentialStore.LoadFile(path)["carol"];
+        Assert.Equal("pass", cred.Password);
+        Assert.Equal("ro",   cred.Role);
+    }
+
+    [Fact]
+    public void LoadFile_WoRole_Parsed()
+    {
+        var path = WriteFile("dave:pass:wo\n");
+        var cred = CredentialStore.LoadFile(path)["dave"];
+        Assert.Equal("pass", cred.Password);
+        Assert.Equal("wo",   cred.Role);
+    }
+
+    [Fact]
+    public void LoadFile_RoleIsCaseInsensitive()
+    {
+        var path = WriteFile("alice:secret:ADMIN\n");
+        Assert.Equal("admin", CredentialStore.LoadFile(path)["alice"].Role);
+    }
+
+    [Fact]
+    public void LoadFile_PasswordWithColons_NoRole_UsesFullRest()
+    {
+        // Last segment "extra" is not a role keyword → whole rest is the password.
+        var path = WriteFile("alice:pass:word:extra\n");
+        var cred = CredentialStore.LoadFile(path)["alice"];
+        Assert.Equal("pass:word:extra", cred.Password);
+        Assert.Equal("rw",              cred.Role);
+    }
+
+    [Fact]
+    public void LoadFile_PasswordWithColons_TrailingRole_DetectsRole()
+    {
+        // Last segment is a valid role — strip it and use the rest as password.
+        var path = WriteFile("alice:pass:word:admin\n");
+        var cred = CredentialStore.LoadFile(path)["alice"];
+        Assert.Equal("pass:word", cred.Password);
+        Assert.Equal("admin",     cred.Role);
     }
 
     [Fact]
@@ -74,9 +124,7 @@ public sealed class CredentialStoreTests : IDisposable
     public void LoadFile_BlankLines_AreSkipped()
     {
         var path = WriteFile("\n\nalice:secret\n\n\n");
-        var creds = CredentialStore.LoadFile(path);
-
-        Assert.Single(creds);
+        Assert.Single(CredentialStore.LoadFile(path));
     }
 
     [Fact]
@@ -86,7 +134,7 @@ public sealed class CredentialStoreTests : IDisposable
         var creds = CredentialStore.LoadFile(path);
 
         Assert.Single(creds);
-        Assert.Equal("second", creds["alice"]);
+        Assert.Equal("second", creds["alice"].Password);
     }
 
     [Fact]
@@ -120,15 +168,24 @@ public sealed class CredentialStoreTests : IDisposable
     }
 
     [Fact]
+    public void LoadFile_EmptyPasswordAfterRoleStrip_IsSkipped()
+    {
+        // "alice::admin" → after stripping :admin role, password is "" → skip
+        var path = WriteFile("alice::admin\nbob:secret\n");
+        var creds = CredentialStore.LoadFile(path);
+
+        Assert.Single(creds);
+        Assert.True(creds.ContainsKey("bob"));
+    }
+
+    [Fact]
     public void LoadFile_WhitespaceAroundEntry_IsTrimmed()
     {
         var path = WriteFile("  alice:secret  \n");
         var creds = CredentialStore.LoadFile(path);
 
-        // The whole line is trimmed, but only the outer whitespace.
-        // "alice:secret" is the result after trim.
         Assert.Single(creds);
-        Assert.Equal("secret", creds["alice"]);
+        Assert.Equal("secret", creds["alice"].Password);
     }
 
     // ── LoadFileWithDiagnostics ───────────────────────────────────────────────
