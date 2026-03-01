@@ -35,8 +35,13 @@ public sealed class FileWatcher : IDisposable
         _watcher.Renamed += OnChanged;
     }
 
-    private void OnChanged(object _, FileSystemEventArgs __)
+    private void OnChanged(object _, FileSystemEventArgs e)
     {
+        // Ignore events for .part temp files (created/deleted during uploads).
+        // A rename FROM .part TO the final name has FullPath = final name, so it passes through.
+        if (e.FullPath.EndsWith(".part", StringComparison.OrdinalIgnoreCase))
+            return;
+
         lock (_lock)
         {
             foreach (var ch in _clients)
