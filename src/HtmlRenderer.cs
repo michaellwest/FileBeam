@@ -10,7 +10,9 @@ public static class HtmlRenderer
         List<DirectoryInfo> dirs,
         List<FileInfo> files,
         bool isReadOnly = false,
-        string csrfToken = "")
+        string csrfToken = "",
+        string sort = "name",
+        string order = "asc")
     {
         var segments      = relPath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
         var uploadSection = isReadOnly ? "" : BuildUploadSection(segments);
@@ -18,10 +20,30 @@ public static class HtmlRenderer
         return ResourceLoader.Template
             .Replace("{{PAGE_TITLE}}",      HttpUtility.HtmlEncode(relPath))
             .Replace("{{BREADCRUMB}}",      BuildBreadcrumb(segments))
+            .Replace("{{THEAD}}",           BuildTHead(sort, order))
             .Replace("{{ROWS}}",            BuildRows(segments, dirs, files))
             .Replace("{{UPLOAD_SECTION}}", uploadSection)
             .Replace("{{CSRF_TOKEN}}",      HttpUtility.HtmlAttributeEncode(csrfToken))
             .Replace("{{APP_JS}}",          ResourceLoader.AppJs);
+    }
+
+    private static string BuildTHead(string sort, string order)
+    {
+        string SortLink(string col, string label)
+        {
+            var isCurrent = sort == col;
+            var nextOrder = isCurrent && order == "asc" ? "desc" : "asc";
+            var indicator = isCurrent ? (order == "asc" ? " ▲" : " ▼") : "";
+            return $"""<a href="?sort={col}&amp;order={nextOrder}" style="color:inherit;text-decoration:none">{label}{indicator}</a>""";
+        }
+        return $"""
+        <tr>
+          <th>{SortLink("name", "Name")}</th>
+          <th>{SortLink("size", "Size")}</th>
+          <th>{SortLink("date", "Modified")}</th>
+          <th></th>
+        </tr>
+        """;
     }
 
     private static string BuildUploadSection(string[] segments)
