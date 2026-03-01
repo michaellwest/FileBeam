@@ -63,6 +63,13 @@ filebeam.exe --download ./share --credentials-file ./creds.txt
 
 `--password` and `--credentials-file` can be used together. A request is authenticated when it matches **either** a per-user entry **or** the shared password.
 
+**Safeguards:**
+- If the file is missing at startup, FileBeam **still enforces auth** — all logins are rejected until the file appears. A warning is printed to the console.
+- Malformed lines (missing `:`, empty username, empty password) are skipped with a per-line warning showing the line number.
+- If the file path is a directory, or the parent directory does not exist, or the file is unreadable, FileBeam exits with an error rather than starting unprotected.
+- The file is **watched for changes** and reloaded automatically (300 ms debounce). Deleting the file at runtime locks everyone out; recreating it restores access. No restart required.
+- Credentials are loaded once per save event. Changes take effect within ~300 ms.
+
 #### Per-sender upload folders
 
 When `--per-sender` is set, each uploader's files land in their own subfolder inside the upload directory:
@@ -288,7 +295,8 @@ Output: `src\bin\Release\net10.0\win-x64\publish\filebeam.exe`
 ## Security notes
 
 - **Authentication is optional.** Use `--password` (shared) or `--credentials-file` (per-user) to enable Basic Auth for trusted-but-not-open LAN scenarios. Both can be active at the same time. Without auth, anyone on the network can access the server.
-- **No HTTPS.** Intended for LAN use — add a reverse proxy if you need TLS.
+- **Credentials file permissions.** The credentials file contains plaintext passwords. Restrict read access to the user running FileBeam (e.g. `chmod 600 creds.txt` on Linux/macOS). On Windows, use NTFS ACLs to limit access.
+- **No HTTPS.** Intended for LAN use — add a reverse proxy if you need TLS. Basic Auth credentials are transmitted in the clear over HTTP.
 - Path traversal is blocked; requests cannot escape the served directory.
 - Filenames are sanitised on upload (directory components stripped).
 

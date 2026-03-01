@@ -131,6 +131,73 @@ public sealed class CredentialStoreTests : IDisposable
         Assert.Equal("secret", creds["alice"]);
     }
 
+    // ── LoadFileWithDiagnostics ───────────────────────────────────────────────
+
+    [Fact]
+    public void LoadFileWithDiagnostics_NoColon_ProducesWarning()
+    {
+        var path = WriteFile("nocolon\nalice:secret\n");
+        var (creds, warnings) = CredentialStore.LoadFileWithDiagnostics(path);
+
+        Assert.Single(creds);
+        Assert.Single(warnings);
+        Assert.Equal(1,          warnings[0].LineNumber);
+        Assert.Equal("nocolon",  warnings[0].LineText);
+        Assert.Contains("':'",   warnings[0].Reason);
+    }
+
+    [Fact]
+    public void LoadFileWithDiagnostics_EmptyUsername_ProducesWarning()
+    {
+        var path = WriteFile(":password\nalice:secret\n");
+        var (_, warnings) = CredentialStore.LoadFileWithDiagnostics(path);
+
+        Assert.Single(warnings);
+        Assert.Contains("username", warnings[0].Reason);
+    }
+
+    [Fact]
+    public void LoadFileWithDiagnostics_EmptyPassword_ProducesWarning()
+    {
+        var path = WriteFile("alice:\nbob:secret\n");
+        var (_, warnings) = CredentialStore.LoadFileWithDiagnostics(path);
+
+        Assert.Single(warnings);
+        Assert.Contains("password", warnings[0].Reason);
+    }
+
+    [Fact]
+    public void LoadFileWithDiagnostics_CommentsAndBlankLines_NoWarnings()
+    {
+        var path = WriteFile("# comment\n\nalice:secret\n");
+        var (creds, warnings) = CredentialStore.LoadFileWithDiagnostics(path);
+
+        Assert.Single(creds);
+        Assert.Empty(warnings);
+    }
+
+    [Fact]
+    public void LoadFileWithDiagnostics_MultipleErrors_CorrectLineNumbers()
+    {
+        var path = WriteFile("alice:ok\nnocolon\nbob:ok\n:emptyuser\n");
+        var (creds, warnings) = CredentialStore.LoadFileWithDiagnostics(path);
+
+        Assert.Equal(2, creds.Count);
+        Assert.Equal(2, warnings.Count);
+        Assert.Equal(2, warnings[0].LineNumber); // "nocolon"
+        Assert.Equal(4, warnings[1].LineNumber); // ":emptyuser"
+    }
+
+    [Fact]
+    public void LoadFileWithDiagnostics_MissingFile_ReturnsEmptyWithNoWarnings()
+    {
+        var (creds, warnings) = CredentialStore.LoadFileWithDiagnostics(
+            Path.Combine(_tempDir, "missing.txt"));
+
+        Assert.Empty(creds);
+        Assert.Empty(warnings);
+    }
+
     // ── VerifyPassword ────────────────────────────────────────────────────────
 
     [Fact]
