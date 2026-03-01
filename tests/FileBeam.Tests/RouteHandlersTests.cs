@@ -536,4 +536,212 @@ public sealed class RouteHandlersTests : IDisposable
         var result = _handlers.MkDir(MakeAdminContext(), subpath);
         Assert.Equal(403, StatusCode(result));
     }
+
+    // ── BrowseMyUploads ───────────────────────────────────────────────────────
+
+    [Fact]
+    public void BrowseMyUploads_WithoutPerSender_Returns404()
+    {
+        // handlers constructed without perSender — feature unavailable
+        var result = _handlers.BrowseMyUploads(MakeContext());
+        Assert.Equal(404, StatusCode(result));
+    }
+
+    [Fact]
+    public async Task BrowseMyUploads_WithPerSender_RwUser_Returns200()
+    {
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher, perSender: true);
+        var ctx = MakeContext();
+        // Simulate Basic Auth header for username "alice"
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes("alice:pass"));
+        ctx.Request.Headers.Authorization = $"Basic {encoded}";
+
+        var result = handlers.BrowseMyUploads(ctx);
+        Assert.Equal(200, await ExecuteAsync(result));
+    }
+
+    [Fact]
+    public void BrowseMyUploads_WithPerSender_RoUser_Returns403()
+    {
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher, perSender: true);
+        var ctx = MakeContext();
+        ctx.Items["fb.role"] = "ro";
+
+        var result = handlers.BrowseMyUploads(ctx);
+        Assert.Equal(403, StatusCode(result));
+    }
+
+    [Fact]
+    public async Task BrowseMyUploads_WithPerSender_WoUser_Returns200()
+    {
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher, perSender: true);
+        var ctx = MakeContext();
+        ctx.Items["fb.role"] = "wo";
+
+        var result = handlers.BrowseMyUploads(ctx);
+        Assert.Equal(200, await ExecuteAsync(result));
+    }
+
+    [Fact]
+    public async Task BrowseMyUploads_PathTraversal_Returns403()
+    {
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher, perSender: true);
+        var ctx = MakeContext();
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes("alice:pass"));
+        ctx.Request.Headers.Authorization = $"Basic {encoded}";
+
+        var result = handlers.BrowseMyUploads(ctx, subpath: "../../etc");
+        Assert.Equal(403, StatusCode(result));
+    }
+
+    // ── DownloadMyUpload ──────────────────────────────────────────────────────
+
+    [Fact]
+    public void DownloadMyUpload_WithoutPerSender_Returns404()
+    {
+        var result = _handlers.DownloadMyUpload(MakeContext(), "file.txt");
+        Assert.Equal(404, StatusCode(result));
+    }
+
+    [Fact]
+    public async Task DownloadMyUpload_ExistingFile_WoUser_Returns200()
+    {
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher, perSender: true);
+        var ctx = MakeContext();
+        ctx.Items["fb.role"] = "wo";
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes("alice:pass"));
+        ctx.Request.Headers.Authorization = $"Basic {encoded}";
+
+        // Create a file in alice's sender subfolder
+        var senderDir = Path.Combine(_uploadDir, "alice");
+        Directory.CreateDirectory(senderDir);
+        await File.WriteAllTextAsync(Path.Combine(senderDir, "doc.txt"), "data");
+
+        var result = handlers.DownloadMyUpload(ctx, "doc.txt");
+        Assert.Equal(200, await ExecuteAsync(result));
+    }
+
+    [Fact]
+    public async Task DownloadMyUpload_FileNotFound_Returns404()
+    {
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher, perSender: true);
+        var ctx = MakeContext();
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes("alice:pass"));
+        ctx.Request.Headers.Authorization = $"Basic {encoded}";
+
+        var result = handlers.DownloadMyUpload(ctx, "missing.txt");
+        Assert.Equal(404, StatusCode(result));
+    }
+
+    // ── BrowseAdminUploads ────────────────────────────────────────────────────
+
+    [Fact]
+    public void BrowseAdminUploads_NonAdmin_Returns403()
+    {
+        var result = _handlers.BrowseAdminUploads(MakeContext());
+        Assert.Equal(403, StatusCode(result));
+    }
+
+    [Fact]
+    public async Task BrowseAdminUploads_Admin_Returns200()
+    {
+        var result = _handlers.BrowseAdminUploads(MakeAdminContext());
+        Assert.Equal(200, await ExecuteAsync(result));
+    }
+
+    [Fact]
+    public void BrowseAdminUploads_PathTraversal_Returns403()
+    {
+        var result = _handlers.BrowseAdminUploads(MakeAdminContext(), "../../etc");
+        Assert.Equal(403, StatusCode(result));
+    }
+
+    // ── Revocation endpoints ──────────────────────────────────────────────────
+
+    [Fact]
+    public void RevokeUser_NonAdmin_Returns403()
+    {
+        var result = _handlers.RevokeUser(MakeContext(), "alice");
+        Assert.Equal(403, StatusCode(result));
+    }
+
+    [Fact]
+    public async Task RevokeUser_Admin_Returns200AndAppearsInList()
+    {
+        var revStore = new RevocationStore();
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher, revocationStore: revStore);
+
+        var revResult = handlers.RevokeUser(MakeAdminContext(), "alice");
+        Assert.Equal(200, await ExecuteAsync(revResult));
+        Assert.True(revStore.IsUserRevoked("alice"));
+
+        // ListRevocations should include "alice"
+        var listResult = handlers.ListRevocations(MakeAdminContext());
+        var body = await ReadBodyAsync(listResult);
+        Assert.Contains("alice", body);
+    }
+
+    [Fact]
+    public async Task UnrevokeUser_Admin_RemovesFromList()
+    {
+        var revStore = new RevocationStore();
+        revStore.RevokeUser("bob");
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher, revocationStore: revStore);
+
+        await ExecuteAsync(handlers.UnrevokeUser(MakeAdminContext(), "bob"));
+        Assert.False(revStore.IsUserRevoked("bob"));
+    }
+
+    [Fact]
+    public void RevokeIp_NonAdmin_Returns403()
+    {
+        var result = _handlers.RevokeIp(MakeContext(), "1.2.3.4");
+        Assert.Equal(403, StatusCode(result));
+    }
+
+    [Fact]
+    public async Task RevokeIp_Admin_Returns200AndAppearsInList()
+    {
+        var revStore = new RevocationStore();
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher, revocationStore: revStore);
+
+        await ExecuteAsync(handlers.RevokeIp(MakeAdminContext(), "1.2.3.4"));
+        Assert.True(revStore.IsIpRevoked("1.2.3.4"));
+
+        var body = await ReadBodyAsync(handlers.ListRevocations(MakeAdminContext()));
+        Assert.Contains("1.2.3.4", body);
+    }
+
+    [Fact]
+    public void ListRevocations_NonAdmin_Returns403()
+    {
+        var result = _handlers.ListRevocations(MakeContext());
+        Assert.Equal(403, StatusCode(result));
+    }
+
+    // ── ListShareTokens ───────────────────────────────────────────────────────
+
+    [Fact]
+    public void ListShareTokens_NonAdmin_Returns403()
+    {
+        var result = _handlers.ListShareTokens(MakeContext());
+        Assert.Equal(403, StatusCode(result));
+    }
+
+    [Fact]
+    public async Task ListShareTokens_Admin_ReturnsCreatorField()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_rootDir, "report.txt"), "data");
+
+        // Create a share link as "alice"
+        var shareCtx = MakeAdminContext();
+        shareCtx.Items["fb.user"] = "alice";
+        shareCtx.Request.QueryString = QueryString.Empty;
+        _handlers.CreateShareLink(shareCtx, "report.txt");
+
+        var body = await ReadBodyAsync(_handlers.ListShareTokens(MakeAdminContext()));
+        Assert.Contains("alice", body);
+        Assert.Contains("tokenPrefix", body);
+        Assert.Contains("expiresIn", body);
+    }
 }

@@ -14,7 +14,9 @@ public static class HtmlRenderer
         string sort = "name",
         string order = "asc",
         string role = "rw",
-        bool separateUploadDir = false)
+        bool separateUploadDir = false,
+        string urlBase = "",
+        string navLinks = "")
     {
         var segments = relPath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
 
@@ -22,32 +24,49 @@ public static class HtmlRenderer
         // Uploads always target root regardless of which URL was visited.
         var isWo      = role == "wo";
         var isRo      = role == "ro";
-        var canUpload = !isReadOnly && !isRo;
+        var canUpload = !isReadOnly && !isRo && string.IsNullOrEmpty(urlBase);
         var isAdmin   = role == "admin";
         var uploadSegs = isWo ? [] : segments;   // wo users always upload to root
 
         string uploadSection;
         if (canUpload)
             uploadSection = BuildUploadSection(uploadSegs, isAdmin, isWo, separateUploadDir);
-        else if (isRo)
+        else if (isRo && string.IsNullOrEmpty(urlBase))
             uploadSection = BuildRoNotice();
         else
-            uploadSection = "";  // global --readonly
+            uploadSection = "";  // read-only view or alternate url base
 
         var bodyClass = isWo ? "role-wo" : "";
 
         return ResourceLoader.Template
             .Replace("{{PAGE_TITLE}}",      HttpUtility.HtmlEncode(relPath))
             .Replace("{{BODY_CLASS}}",      bodyClass)
-            .Replace("{{BREADCRUMB}}",      BuildBreadcrumb(segments))
-            .Replace("{{THEAD}}",           BuildTHead(sort, order))
-            .Replace("{{ROWS}}",            BuildRows(segments, dirs, files, isAdmin))
+            .Replace("{{NAV_LINKS}}",       navLinks)
+            .Replace("{{BREADCRUMB}}",      BuildBreadcrumb(segments, urlBase))
+            .Replace("{{THEAD}}",           BuildTHead(sort, order, urlBase))
+            .Replace("{{ROWS}}",            BuildRows(segments, dirs, files, isAdmin, urlBase))
             .Replace("{{UPLOAD_SECTION}}", uploadSection)
             .Replace("{{CSRF_TOKEN}}",      HttpUtility.HtmlAttributeEncode(csrfToken))
             .Replace("{{APP_JS}}",          ResourceLoader.AppJs);
     }
 
-    private static string BuildTHead(string sort, string order)
+    /// <summary>
+    /// Builds nav link HTML for "My Uploads" and/or "Admin Uploads" based on role and config.
+    /// </summary>
+    public static string BuildNavLinks(string role, bool perSender, bool separateUploadDir)
+    {
+        var sb = new StringBuilder();
+        if (separateUploadDir && perSender && role != "ro")
+            sb.Append("""<a href="/my-uploads" style="font-size:0.82rem;color:#aaa;white-space:nowrap">My&nbsp;Uploads</a>""");
+        if (role == "admin" && separateUploadDir)
+        {
+            if (sb.Length > 0) sb.Append("""<span style="color:#444">·</span>""");
+            sb.Append("""<a href="/admin/uploads" style="font-size:0.82rem;color:#aaa;white-space:nowrap">All&nbsp;Uploads</a>""");
+        }
+        return sb.ToString();
+    }
+
+    private static string BuildTHead(string sort, string order, string urlBase = "")
     {
         string SortLink(string col, string label)
         {
@@ -133,16 +152,23 @@ public static class HtmlRenderer
         string[] segments,
         List<DirectoryInfo> dirs,
         List<FileInfo> files,
-        bool isAdmin = false)
+        bool isAdmin = false,
+        string urlBase = "")
     {
+        // Determine URL prefixes based on the view root
+        var browsePrefix   = string.IsNullOrEmpty(urlBase) ? "/browse/"       : $"/{urlBase}/browse/";
+        var downloadPrefix = string.IsNullOrEmpty(urlBase) ? "/download/"     : $"/{urlBase}/download/";
+        var zipPrefix      = string.IsNullOrEmpty(urlBase) ? "/download-zip/" : "/download-zip/";
+        var rootHref       = string.IsNullOrEmpty(urlBase) ? "/"              : $"/{urlBase}";
+
         var sb = new StringBuilder();
 
         // Parent directory link
         if (segments.Length > 0)
         {
             var parentPath = segments.Length == 1
-                ? "/"
-                : "/browse/" + string.Join("/", segments[..^1].Select(Uri.EscapeDataString));
+                ? rootHref
+                : browsePrefix + string.Join("/", segments[..^1].Select(Uri.EscapeDataString));
             sb.AppendLine($"""
                     <tr>
                       <td colspan="4"><a href="{parentPath}" class="name"><span class="icon">📁</span> ..</a></td>
@@ -153,8 +179,8 @@ public static class HtmlRenderer
         // Subdirectories
         foreach (var dir in dirs)
         {
-            var href   = "/browse/"       + UrlPath(segments, dir.Name);
-            var zipUrl = "/download-zip/" + UrlPath(segments, dir.Name);
+            var href   = browsePrefix + UrlPath(segments, dir.Name);
+            var zipUrl = zipPrefix    + UrlPath(segments, dir.Name);
             var name   = HttpUtility.HtmlEncode(dir.Name);
             var modif  = dir.LastWriteTime.ToString("yyyy-MM-dd HH:mm");
             sb.AppendLine($"""
@@ -170,17 +196,18 @@ public static class HtmlRenderer
         // Files
         foreach (var file in files)
         {
-            var href      = "/download/" + UrlPath(segments, file.Name);
-            var deleteUrl = "/delete/"   + UrlPath(segments, file.Name);
-            var renameUrl = "/rename/"   + UrlPath(segments, file.Name);
-            var shareUrl  = "/share/"    + UrlPath(segments, file.Name);
+            var href      = downloadPrefix + UrlPath(segments, file.Name);
+            var deleteUrl = "/delete/"     + UrlPath(segments, file.Name);
+            var renameUrl = "/rename/"     + UrlPath(segments, file.Name);
+            var shareUrl  = "/share/"      + UrlPath(segments, file.Name);
             var name      = HttpUtility.HtmlEncode(file.Name);
             var nameJs    = HttpUtility.JavaScriptStringEncode(file.Name);
             var extJs     = HttpUtility.JavaScriptStringEncode(file.Extension.ToLowerInvariant());
             var size      = FormatSize(file.Length);
             var modif     = file.LastWriteTime.ToString("yyyy-MM-dd HH:mm");
             var icon      = FileIcon(file.Extension);
-            var adminButtons = isAdmin
+            // Admin mutation buttons only shown in the main browse view
+            var adminButtons = isAdmin && string.IsNullOrEmpty(urlBase)
                 ? $"""
                         <button class="act-btn" title="Share link" onclick="fbShare('{shareUrl}')">🔗</button>
                         <button class="act-btn" title="Rename" onclick="fbRename('{renameUrl}','{nameJs}')">✏️</button>
@@ -208,10 +235,14 @@ public static class HtmlRenderer
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private static string BuildBreadcrumb(string[] segments)
+    private static string BuildBreadcrumb(string[] segments, string urlBase = "")
     {
+        var rootHref     = string.IsNullOrEmpty(urlBase) ? "/"         : $"/{urlBase}";
+        var rootLabel    = string.IsNullOrEmpty(urlBase) ? "root"      : urlBase.Split('/')[^1].Replace("-", " ");
+        var browsePrefix = string.IsNullOrEmpty(urlBase) ? "/browse/"  : $"/{urlBase}/browse/";
+
         var sb = new StringBuilder();
-        sb.Append("<a href=\"/\">root</a>");
+        sb.Append($"<a href=\"{rootHref}\">{rootLabel}</a>");
         for (int i = 0; i < segments.Length; i++)
         {
             sb.Append(" / ");
@@ -219,7 +250,7 @@ public static class HtmlRenderer
                 sb.Append($"<span>{HttpUtility.HtmlEncode(segments[i])}</span>");
             else
             {
-                var href = "/browse/" + string.Join("/", segments[..(i + 1)].Select(Uri.EscapeDataString));
+                var href = browsePrefix + string.Join("/", segments[..(i + 1)].Select(Uri.EscapeDataString));
                 sb.Append($"<a href=\"{href}\">{HttpUtility.HtmlEncode(segments[i])}</a>");
             }
         }

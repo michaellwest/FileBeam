@@ -365,6 +365,7 @@ var app = builder.Build();
 
 // Wire up FileWatcher and route handlers
 using var fileWatcher = new FileWatcher(serveDir, maxSseConnections: 50);
+var revocationStore = new RevocationStore();
 
 // ── Audit logger (optional) ───────────────────────────────────────────────────
 // --audit-log <path>  → log to file
@@ -391,6 +392,7 @@ var handlers = new RouteHandlers(
     maxUploadBytesTotal:    maxUploadTotal,
     csrfToken:              csrfToken,
     shareTtlSeconds:        shareTtl,
+    revocationStore:        revocationStore,
     debugLog:               debugLog);
 
 // ── Console request log (with elapsed time) ──────────────────────────────────
@@ -525,6 +527,13 @@ if (authRequired)
 
         var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
+        // IP ban check — hard block before lockout / credential checks
+        if (revocationStore.IsIpRevoked(ip))
+        {
+            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return;
+        }
+
         // Check lockout before touching the header
         bool locked;
         lock (authLock)
@@ -558,14 +567,28 @@ if (authRequired)
                     if (credWatcher?.Current.TryGetValue(submittedUser, out var userCred) == true)
                     {
                         authenticated = CredentialStore.VerifyPassword(submittedPass, userCred.Password);
-                        if (authenticated) ctx.Items["fb.role"] = userCred.Role;
+                        if (authenticated)
+                        {
+                            // Username ban check — immediate revocation even with valid credentials
+                            if (revocationStore.IsUserRevoked(submittedUser))
+                                authenticated = false;
+                            else
+                            {
+                                ctx.Items["fb.role"] = userCred.Role;
+                                ctx.Items["fb.user"] = submittedUser;
+                            }
+                        }
                     }
 
                     // 2. Fall back to shared password (any username accepted) — role is rw
                     if (!authenticated && !string.IsNullOrEmpty(password))
                     {
                         authenticated = CredentialStore.VerifyPassword(submittedPass, password);
-                        if (authenticated) ctx.Items["fb.role"] = "rw";
+                        if (authenticated)
+                        {
+                            ctx.Items["fb.role"] = "rw";
+                            ctx.Items["fb.user"] = submittedUser;
+                        }
                     }
                 }
             }
@@ -636,6 +659,21 @@ app.MapGet("/s/{token}",            handlers.RedeemShareLink);
 app.MapPost("/mkdir/{**subpath}",   handlers.MkDir);
 app.MapGet("/disk-space",           handlers.DiskSpace);
 app.MapGet("/events",               handlers.FileEvents);
+
+// ── My Uploads (per-sender scoped view of upload dir) ─────────────────────────
+app.MapGet("/my-uploads",                       handlers.BrowseMyUploads);
+app.MapGet("/my-uploads/browse/{**subpath}",    handlers.BrowseMyUploads);
+app.MapGet("/my-uploads/download/{**subpath}",  handlers.DownloadMyUpload);
+
+// ── Admin: full upload dir browse + share token list + revocation ──────────────
+app.MapGet("/admin/uploads",                handlers.BrowseAdminUploads);
+app.MapGet("/admin/uploads/{**subpath}",    handlers.BrowseAdminUploads);
+app.MapGet("/admin/shares",                 handlers.ListShareTokens);
+app.MapGet("/admin/revoke",                 handlers.ListRevocations);
+app.MapPost("/admin/revoke/user/{username}", handlers.RevokeUser);
+app.MapPost("/admin/unrevoke/user/{username}", handlers.UnrevokeUser);
+app.MapPost("/admin/revoke/ip/{ip}",        handlers.RevokeIp);
+app.MapPost("/admin/unrevoke/ip/{ip}",      handlers.UnrevokeIp);
 
 try   { await app.RunAsync(); }
 finally
