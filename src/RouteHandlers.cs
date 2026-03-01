@@ -426,6 +426,32 @@ public class RouteHandlers(
         return Results.Redirect(browseUrl);
     }
 
+    // POST /mkdir/{**subpath}
+    public IResult MkDir(HttpContext ctx, string? subpath)
+    {
+        if (isReadOnly)
+            return Results.StatusCode(StatusCodes.Status405MethodNotAllowed);
+
+        if (string.IsNullOrEmpty(subpath))
+            return Results.BadRequest("No folder name specified.");
+
+        string resolved;
+        try { resolved = SafeResolvePath(subpath); }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        if (Directory.Exists(resolved))
+            return Results.Conflict("A directory with that name already exists.");
+
+        var parent = Path.GetDirectoryName(resolved);
+        if (parent is null || !Directory.Exists(parent))
+            return Results.NotFound("Parent directory not found.");
+
+        Directory.CreateDirectory(resolved);
+
+        var relPath = Path.GetRelativePath(rootDir, resolved).Replace('\\', '/');
+        return Results.Redirect($"/browse/{relPath}");
+    }
+
     // GET /events  — Server-Sent Events stream for live reload
     public async Task FileEvents(HttpContext ctx)
     {

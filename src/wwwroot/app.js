@@ -151,6 +151,22 @@ function fbRename(url, currentName) {
   f.submit();
 }
 
+// ── New folder ────────────────────────────────────────────────────────────────
+function fbMkDir(pathPrefix) {
+  const name = prompt('New folder name:');
+  if (!name || !name.trim()) return;
+  const folderName = name.trim();
+  const base = pathPrefix ? pathPrefix + '/' : '';
+  const url = '/mkdir/' + base + encodeURIComponent(folderName);
+  const f = document.createElement('form');
+  f.method = 'post'; f.action = url;
+  const csrf = document.createElement('input');
+  csrf.type = 'hidden'; csrf.name = '_csrf'; csrf.value = csrfToken;
+  f.appendChild(csrf);
+  document.body.appendChild(f);
+  f.submit();
+}
+
 // ── Live reload via Server-Sent Events ────────────────────────────────────────
 (function connectSSE() {
   const es = new EventSource('/events');

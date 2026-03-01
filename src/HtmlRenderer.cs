@@ -30,6 +30,9 @@ public static class HtmlRenderer
             ? "/upload/"
             : "/upload/" + string.Join("/", segments.Select(Uri.EscapeDataString));
 
+        var mkdirBase = System.Web.HttpUtility.JavaScriptStringEncode(
+            segments.Length == 0 ? "" : string.Join("/", segments.Select(Uri.EscapeDataString)));
+
         return $"""
             <div class="upload-section">
               <h2>Upload files to this folder</h2>
@@ -42,6 +45,9 @@ public static class HtmlRenderer
                 <div id="upload-queue" hidden></div>
                 <button type="submit" class="btn">Upload</button>
               </form>
+              <div style="margin-top:0.75rem">
+                <button class="btn btn-secondary" onclick="fbMkDir('{mkdirBase}')">📁 New Folder</button>
+              </div>
             </div>
             """;
     }

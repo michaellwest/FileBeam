@@ -438,6 +438,7 @@ app.MapGet("/download/{**subpath}", handlers.DownloadFile);
 app.MapPost("/upload/{**subpath}",  handlers.UploadFiles);
 app.MapPost("/delete/{**subpath}",  handlers.DeleteFile);
 app.MapPost("/rename/{**subpath}",  handlers.RenameFile);
+app.MapPost("/mkdir/{**subpath}",   handlers.MkDir);
 app.MapGet("/events",               handlers.FileEvents);
 
 try   { await app.RunAsync(); }
