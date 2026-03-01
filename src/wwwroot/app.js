@@ -121,20 +121,55 @@ function checkDone() {
     setTimeout(() => window.location.reload(), 800);
 }
 
-dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('dragover'); });
-dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
-dz.addEventListener('drop', e => {
-  e.preventDefault();
-  dz.classList.remove('dragover');
-  startUploads(e.dataTransfer.files);
-});
+// Upload form / drop-zone event listeners (null-guarded: absent in ReadOnly mode)
+if (dz) {
+  dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('dragover'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault();
+    dz.classList.remove('dragover');
+    startUploads(e.dataTransfer.files);
+  });
+}
+if (form) {
+  form.addEventListener('submit', e => {
+    e.preventDefault();
+    if (inp.files.length === 0) return;
+    startUploads(inp.files);
+    inp.value = '';
+  });
+}
 
-form.addEventListener('submit', e => {
-  e.preventDefault();
-  if (inp.files.length === 0) return;
-  startUploads(inp.files);
-  inp.value = '';
-});
+// ── Table-level drop zone (covers the whole directory listing) ────────────────
+const _table = document.querySelector('table');
+if (_table) {
+  _table.addEventListener('dragover', e => {
+    e.preventDefault();
+    _table.classList.add('drag-active');
+  });
+  _table.addEventListener('dragleave', e => {
+    if (!_table.contains(e.relatedTarget)) _table.classList.remove('drag-active');
+  });
+  _table.addEventListener('drop', e => {
+    e.preventDefault();
+    _table.classList.remove('drag-active');
+
+    if (!form) {
+      alert('ReadOnly mode — uploads are disabled.');
+      return;
+    }
+
+    // Detect directory items
+    const items = [...(e.dataTransfer.items || [])];
+    const hasDir = items.some(it => it.kind === 'file' && it.webkitGetAsEntry?.()?.isDirectory);
+    if (hasDir) {
+      alert('Directory upload is not supported. Please select individual files.');
+      return;
+    }
+
+    startUploads(e.dataTransfer.files);
+  });
+}
 
 // ── File actions (delete / rename) ───────────────────────────────────────────
 function fbDelete(url, name) {
