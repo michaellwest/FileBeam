@@ -47,12 +47,24 @@ function uploadFile(file) {
   fd.append('_csrf', csrfToken);
   fd.append('files', file, file.name);
 
-  const xhr = new XMLHttpRequest();
+  const xhr       = new XMLHttpRequest();
+  const startTime = Date.now();
   btn.addEventListener('click', () => xhr.abort());
 
   xhr.upload.addEventListener('progress', ev => {
     if (!ev.lengthComputable) return;
-    bar.style.width = Math.round(ev.loaded / ev.total * 100) + '%';
+    const pct     = ev.loaded / ev.total;
+    bar.style.width = Math.round(pct * 100) + '%';
+    const elapsed = (Date.now() - startTime) / 1000;
+    if (elapsed > 0.5 && pct > 0) {
+      const speed    = ev.loaded / elapsed;          // bytes/s
+      const remaining = (ev.total - ev.loaded) / speed; // seconds
+      const speedStr  = fmtSize(speed) + '/s';
+      const etaStr    = remaining > 1
+        ? (remaining < 60 ? Math.round(remaining) + 's' : Math.round(remaining / 60) + 'm')
+        : '';
+      status.textContent = speedStr + (etaStr ? '  ' + etaStr : '');
+    }
   });
 
   xhr.addEventListener('load', () => {
