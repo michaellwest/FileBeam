@@ -130,6 +130,49 @@ public class HtmlRendererTests
         Assert.Contains("&lt;script&gt;", html);
     }
 
+    // ── Separate upload dir — upload redirect notice ──────────────────────────
+
+    [Fact]
+    public void Render_SeparateUploadDir_RwRole_ShowsRedirectNoticeInsteadOfForm()
+    {
+        var html = HtmlRenderer.RenderDirectory("", NoDirs, NoFiles,
+            separateUploadDir: true, role: "rw");
+
+        Assert.DoesNotContain("multipart/form-data", html);
+        Assert.Contains("upload-section", html);
+        Assert.Contains("To upload files", html);
+    }
+
+    [Fact]
+    public void Render_SeparateUploadDir_PerSender_NoticeLinkIsMyUploads()
+    {
+        var html = HtmlRenderer.RenderDirectory("", NoDirs, NoFiles,
+            separateUploadDir: true, role: "rw", perSender: true);
+
+        Assert.Contains("href=\"/my-uploads\"", html);
+        Assert.DoesNotContain("href=\"/upload-area\"", html);
+    }
+
+    [Fact]
+    public void Render_SeparateUploadDir_NoPerSender_NoticeLinkIsUploadArea()
+    {
+        var html = HtmlRenderer.RenderDirectory("", NoDirs, NoFiles,
+            separateUploadDir: true, role: "rw", perSender: false);
+
+        Assert.Contains("href=\"/upload-area\"", html);
+        Assert.DoesNotContain("href=\"/my-uploads\"", html);
+    }
+
+    [Fact]
+    public void Render_SeparateUploadDir_SameDir_StillShowsUploadForm()
+    {
+        // When separateUploadDir=false (same dir), upload form should still appear
+        var html = HtmlRenderer.RenderDirectory("", NoDirs, NoFiles,
+            separateUploadDir: false, role: "rw");
+
+        Assert.Contains("multipart/form-data", html);
+    }
+
     // ── my-uploads view rows ──────────────────────────────────────────────────
 
     [Fact]

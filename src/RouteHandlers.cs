@@ -280,9 +280,36 @@ public class RouteHandlers(
         };
 
         bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
-        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir);
+        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, isReadOnly: isReadOnly);
         var html = HtmlRenderer.RenderDirectory(relPath, dirs.ToList(), files.ToList(), isReadOnly, csrfToken, sort, order, role,
-            separateUploadDir: separateDir, navLinks: navLinks);
+            separateUploadDir: separateDir, navLinks: navLinks, perSender: perSender);
+        return Results.Content(html, "text/html");
+    }
+
+    // GET /upload-area — shared upload page when upload dir is separate and --per-sender is off.
+    // rw and admin users land here after following the nav link or notice on the browse screen.
+    public IResult BrowseUploadArea(HttpContext ctx)
+    {
+        var role = GetRole(ctx);
+
+        // Redirect roles that cannot or should not use this page
+        if (isReadOnly || role == "ro")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
+        if (!separateDir)
+            return Results.Redirect("/");  // same dir — upload is already on the browse screen
+
+        if (perSender)
+            return Results.Redirect("/my-uploads");  // per-sender users have their own upload view
+
+        if (role == "wo")
+            return Results.Redirect("/");  // wo always shows drop zone on browse
+
+        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, showHome: true, isReadOnly: isReadOnly);
+        // Pass separateUploadDir:false so the upload form is rendered (files DO land in uploadDir here)
+        var html = HtmlRenderer.RenderDirectory("", [], [], isReadOnly, csrfToken, "name", "asc", role,
+            separateUploadDir: false, navLinks: navLinks, perSender: perSender);
         return Results.Content(html, "text/html");
     }
 

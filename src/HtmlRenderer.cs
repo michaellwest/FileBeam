@@ -16,7 +16,8 @@ public static class HtmlRenderer
         string role = "rw",
         bool separateUploadDir = false,
         string urlBase = "",
-        string navLinks = "")
+        string navLinks = "",
+        bool perSender = false)
     {
         var segments = relPath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
 
@@ -28,9 +29,16 @@ public static class HtmlRenderer
         var isAdmin   = role == "admin";
         var uploadSegs = isWo ? [] : segments;   // wo users always upload to root
 
+        // When upload dir is separate, the upload form belongs on /my-uploads (perSender)
+        // or /upload-area (!perSender), not on the browse screen.
+        // Exception: wo users always see the drop zone here (their only interface).
+        var showUploadHere = canUpload && (!separateUploadDir || isWo);
+
         string uploadSection;
-        if (canUpload)
-            uploadSection = BuildUploadSection(uploadSegs, isAdmin, isWo, separateUploadDir);
+        if (showUploadHere)
+            uploadSection = BuildUploadSection(uploadSegs, isAdmin, isWo);
+        else if (canUpload && separateUploadDir)
+            uploadSection = BuildUploadRedirectNotice(perSender);
         else if (isRo)
             uploadSection = BuildRoNotice();
         else
@@ -55,7 +63,7 @@ public static class HtmlRenderer
     /// Pass <paramref name="showHome"/> = true when rendering an alternate view (my-uploads, admin/uploads)
     /// so users can navigate back to the main file listing.
     /// </summary>
-    public static string BuildNavLinks(string role, bool perSender, bool separateUploadDir, bool showHome = false)
+    public static string BuildNavLinks(string role, bool perSender, bool separateUploadDir, bool showHome = false, bool isReadOnly = false)
     {
         const string sep  = """<span style="color:#444">·</span>""";
         const string style = "font-size:0.82rem;color:#aaa;white-space:nowrap";
@@ -68,6 +76,13 @@ public static class HtmlRenderer
         {
             if (sb.Length > 0) sb.Append(sep);
             sb.Append($"""<a href="/my-uploads" style="{style}">My&nbsp;Uploads</a>""");
+        }
+        // When upload dir is separate but no per-sender bucketing, expose a shared upload area
+        // for users who can upload (rw, admin — not ro or wo).
+        if (separateUploadDir && !perSender && !isReadOnly && role != "ro" && role != "wo")
+        {
+            if (sb.Length > 0) sb.Append(sep);
+            sb.Append($"""<a href="/upload-area" style="{style}">Upload</a>""");
         }
         if (role == "admin" && separateUploadDir)
         {
@@ -99,8 +114,7 @@ public static class HtmlRenderer
     private static string BuildUploadSection(
         string[] segments,
         bool isAdmin = false,
-        bool isWo = false,
-        bool separateUploadDir = false)
+        bool isWo = false)
     {
         var uploadAction = segments.Length == 0
             ? "/upload/"
@@ -119,13 +133,8 @@ public static class HtmlRenderer
 
         var heading = isWo ? "Upload files" : "Upload files to this folder";
 
-        // Contextual notice shown above the form (for wo) or below the button (separate upload dir)
         var topNotice = isWo
             ? BuildInfoNotice("You have upload-only access. File browsing is not available for your account.")
-            : "";
-
-        var bottomNotice = !isWo && separateUploadDir
-            ? BuildInfoNotice("Uploaded files go to a private storage area and will not appear in this listing. Once uploaded, they cannot be managed from here.")
             : "";
 
         return $"""
@@ -141,10 +150,23 @@ public static class HtmlRenderer
                 <div id="upload-queue" hidden></div>
                 <button type="submit" class="btn">Upload</button>
               </form>
-              {bottomNotice}
               {mkdirButton}
             </div>
             """;
+    }
+
+    private static string BuildUploadRedirectNotice(bool perSender)
+    {
+        var (href, label) = perSender
+            ? ("/my-uploads", "My&nbsp;Uploads")
+            : ("/upload-area", "Upload&nbsp;Area");
+        return $"""
+            <div class="upload-section">
+              <p style="font-size:0.85rem;color:#888;margin:0">
+                To upload files, visit <a href="{href}" style="color:#5ba4f5">{label}</a>.
+              </p>
+            </div>
+        """;
     }
 
     private static string BuildInfoNotice(string text) =>
