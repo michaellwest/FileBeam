@@ -626,24 +626,46 @@ public class RouteHandlers(
         return Results.Redirect($"/browse/{relPath}");
     }
 
-    // GET /disk-space  — JSON with available/total bytes for the upload drive
-    public IResult DiskSpace()
+    // GET /disk-space  — JSON with available/total bytes for the upload drive,
+    // capped by --max-upload-total and/or --max-upload-bytes-per-sender when set.
+    public IResult DiskSpace(HttpContext ctx)
     {
+        long? driveAvailable = null;
+        long? driveTotal     = null;
+
         try
         {
             var root  = Path.GetPathRoot(uploadDir) ?? uploadDir;
             var drive = new DriveInfo(root);
-            return Results.Json(new
-            {
-                availableBytes = drive.AvailableFreeSpace,
-                totalBytes     = drive.TotalSize
-            });
+            driveAvailable = drive.AvailableFreeSpace;
+            driveTotal     = drive.TotalSize;
         }
-        catch
+        catch { /* network or virtual drive — skip */ }
+
+        long? available = driveAvailable;
+        long? total     = driveTotal;
+
+        if (maxUploadBytesTotal > 0)
         {
-            // Network or virtual drive — cannot determine disk space
-            return Results.NoContent();
+            var used      = GetDirectorySize(uploadDir);
+            var remaining = Math.Max(0L, maxUploadBytesTotal - used);
+            available = available.HasValue ? Math.Min(available.Value, remaining) : remaining;
+            total     = total.HasValue    ? Math.Min(total.Value, maxUploadBytesTotal) : maxUploadBytesTotal;
         }
+
+        if (maxUploadBytesPerSender > 0)
+        {
+            var senderKey = ResolveSenderKey(ctx);
+            var already   = _senderQuotas.GetOrAdd(senderKey, 0L);
+            var remaining = Math.Max(0L, maxUploadBytesPerSender - already);
+            available = available.HasValue ? Math.Min(available.Value, remaining) : remaining;
+            total     = total.HasValue    ? Math.Min(total.Value, maxUploadBytesPerSender) : maxUploadBytesPerSender;
+        }
+
+        if (!available.HasValue)
+            return Results.NoContent();
+
+        return Results.Json(new { availableBytes = available.Value, totalBytes = total!.Value });
     }
 
     // GET /events  — Server-Sent Events stream for live reload
