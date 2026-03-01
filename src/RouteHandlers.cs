@@ -89,14 +89,15 @@ public class RouteHandlers(
     int maxFilesPerDir = 1000,
     string csrfToken = "",
     int shareTtlSeconds = 3600,
+    RevocationStore? revocationStore = null,
     Action<string, string>? debugLog = null)
 {
     // Tracks cumulative bytes uploaded per sender key (IP or username).
     // Best-effort only — not atomic across concurrent uploads from the same sender.
     private readonly ConcurrentDictionary<string, long> _senderQuotas = new();
 
-    // In-memory share token store: token → (resolved file path, expiry).
-    private readonly ConcurrentDictionary<string, (string FilePath, DateTimeOffset Expiry)> _shareTokens = new();
+    // In-memory share token store: token → (resolved file path, expiry, creator username).
+    private readonly ConcurrentDictionary<string, (string FilePath, DateTimeOffset Expiry, string Creator)> _shareTokens = new();
 
     private string SafeResolvePath(string? subpath)
     {
@@ -232,11 +233,16 @@ public class RouteHandlers(
     {
         var role = GetRole(ctx);
 
-        // Write-only users see the root upload drop zone regardless of the path they visited.
+        // Write-only users: redirect to /my-uploads when per-sender is active so they
+        // can see their own files; otherwise show the plain upload drop zone.
         if (role == "wo")
         {
+            bool separateUploadDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
+            if (perSender && separateUploadDir)
+                return Results.Redirect("/my-uploads");
+
             var woHtml = HtmlRenderer.RenderDirectory("", [], [], isReadOnly, csrfToken, "name", "asc", role,
-                separateUploadDir: !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase));
+                separateUploadDir: separateUploadDir);
             return Results.Content(woHtml, "text/html");
         }
 
@@ -269,8 +275,10 @@ public class RouteHandlers(
             _      => desc ? files.OrderByDescending(f => f.Name)          : files.OrderBy(f => f.Name)
         };
 
+        bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
+        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir);
         var html = HtmlRenderer.RenderDirectory(relPath, dirs.ToList(), files.ToList(), isReadOnly, csrfToken, sort, order, role,
-            separateUploadDir: !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase));
+            separateUploadDir: separateDir, navLinks: navLinks);
         return Results.Content(html, "text/html");
     }
 
@@ -536,8 +544,9 @@ public class RouteHandlers(
             if (_shareTokens.TryGetValue(key, out var t) && t.Expiry <= DateTimeOffset.UtcNow)
                 _shareTokens.TryRemove(key, out _);
 
-        var token = System.Security.Cryptography.RandomNumberGenerator.GetHexString(64, lowercase: true);
-        _shareTokens[token] = (resolved, DateTimeOffset.UtcNow.AddSeconds(ttl));
+        var creator = ctx.Items.TryGetValue("fb.user", out var u) && u is string s ? s : "?";
+        var token   = System.Security.Cryptography.RandomNumberGenerator.GetHexString(64, lowercase: true);
+        _shareTokens[token] = (resolved, DateTimeOffset.UtcNow.AddSeconds(ttl), creator);
 
         return Results.Json(new { url = $"/s/{token}", expiresIn = ttl });
     }
@@ -560,9 +569,9 @@ public class RouteHandlers(
             return Results.NotFound("File no longer exists.");
         }
 
-        var info   = new FileInfo(entry.FilePath);
-        var mime   = MimeTypes.GetMimeType(entry.FilePath);
-        var stream = new FileStream(entry.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
+        var info    = new FileInfo(entry.FilePath);
+        var mime    = MimeTypes.GetMimeType(entry.FilePath);
+        var stream  = new FileStream(entry.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
         return Results.File(stream, mime, info.Name, enableRangeProcessing: true);
     }
 
@@ -666,6 +675,245 @@ public class RouteHandlers(
             return Results.NoContent();
 
         return Results.Json(new { availableBytes = available.Value, totalBytes = total!.Value });
+    }
+
+    // GET /admin/shares  — list all live share tokens with creator (admin only)
+    public IResult ListShareTokens(HttpContext ctx)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        var now = DateTimeOffset.UtcNow;
+        var live = _shareTokens
+            .Where(kv => kv.Value.Expiry > now)
+            .Select(kv => new
+            {
+                tokenPrefix = kv.Key[..8] + "…",
+                file        = Path.GetRelativePath(rootDir, kv.Value.FilePath).Replace('\\', '/'),
+                creator     = kv.Value.Creator,
+                expiresAt   = kv.Value.Expiry.ToString("o"),
+                expiresIn   = (int)(kv.Value.Expiry - now).TotalSeconds
+            })
+            .OrderBy(t => t.expiresAt)
+            .ToList();
+
+        return Results.Json(live);
+    }
+
+    // GET /admin/revoke  — list active bans (admin only)
+    public IResult ListRevocations(HttpContext ctx)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        return Results.Json(new
+        {
+            users = revocationStore?.RevokedUsers ?? [],
+            ips   = revocationStore?.RevokedIps   ?? []
+        });
+    }
+
+    // POST /admin/revoke/user/{username}
+    public IResult RevokeUser(HttpContext ctx, string username)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (string.IsNullOrWhiteSpace(username))
+            return Results.BadRequest("Username required.");
+
+        revocationStore?.RevokeUser(username);
+        return Results.Ok(new { revoked = username });
+    }
+
+    // POST /admin/unrevoke/user/{username}
+    public IResult UnrevokeUser(HttpContext ctx, string username)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        revocationStore?.UnrevokeUser(username);
+        return Results.Ok(new { unrevoked = username });
+    }
+
+    // POST /admin/revoke/ip/{ip}
+    public IResult RevokeIp(HttpContext ctx, string ip)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (string.IsNullOrWhiteSpace(ip))
+            return Results.BadRequest("IP required.");
+
+        revocationStore?.RevokeIp(ip);
+        return Results.Ok(new { revokedIp = ip });
+    }
+
+    // POST /admin/unrevoke/ip/{ip}
+    public IResult UnrevokeIp(HttpContext ctx, string ip)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        revocationStore?.UnrevokeIp(ip);
+        return Results.Ok(new { unrevokedIp = ip });
+    }
+
+    // GET /my-uploads  and  GET /my-uploads/browse/{**subpath}
+    // Scoped to the authenticated sender's subfolder inside uploadDir.
+    // Requires --per-sender; returns 404 otherwise (no user-specific folder exists).
+    public IResult BrowseMyUploads(HttpContext ctx, string? subpath = null)
+    {
+        if (!perSender)
+            return Results.NotFound("My Uploads requires --per-sender mode.");
+
+        var role = GetRole(ctx);
+        if (role == "ro")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        var senderKey  = ResolveSenderKey(ctx);
+        var senderRoot = Path.Combine(uploadDir, senderKey);
+
+        // Create the sender's subfolder on first visit so the listing renders
+        if (!Directory.Exists(senderRoot))
+            Directory.CreateDirectory(senderRoot);
+
+        string resolved;
+        try
+        {
+            resolved = string.IsNullOrEmpty(subpath)
+                ? senderRoot
+                : Path.GetFullPath(Path.Combine(senderRoot, subpath));
+
+            if (!resolved.StartsWith(uploadDir, StringComparison.OrdinalIgnoreCase))
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        if (!Directory.Exists(resolved))
+            return Results.NotFound("Directory not found.");
+
+        var relPath = Path.GetRelativePath(senderRoot, resolved).Replace('\\', '/');
+        if (relPath == ".") relPath = "";
+
+        var sort  = ctx.Request.Query["sort"].FirstOrDefault() ?? "name";
+        var order = ctx.Request.Query["order"].FirstOrDefault() ?? "asc";
+        var desc  = string.Equals(order, "desc", StringComparison.OrdinalIgnoreCase);
+
+        var dirs = Directory.GetDirectories(resolved).Select(d => new DirectoryInfo(d));
+        dirs = sort switch
+        {
+            "date" => desc ? dirs.OrderByDescending(d => d.LastWriteTime) : dirs.OrderBy(d => d.LastWriteTime),
+            _      => desc ? dirs.OrderByDescending(d => d.Name)           : dirs.OrderBy(d => d.Name)
+        };
+
+        var files = Directory.GetFiles(resolved).Select(f => new FileInfo(f));
+        files = sort switch
+        {
+            "size" => desc ? files.OrderByDescending(f => f.Length)        : files.OrderBy(f => f.Length),
+            "date" => desc ? files.OrderByDescending(f => f.LastWriteTime) : files.OrderBy(f => f.LastWriteTime),
+            _      => desc ? files.OrderByDescending(f => f.Name)          : files.OrderBy(f => f.Name)
+        };
+
+        var html = HtmlRenderer.RenderDirectory(
+            relPath, dirs.ToList(), files.ToList(),
+            isReadOnly: true,  // no upload form in this view — uploads go through /upload
+            csrfToken, sort, order, role,
+            separateUploadDir: false,
+            urlBase: "my-uploads");
+        return Results.Content(html, "text/html");
+    }
+
+    // GET /my-uploads/download/{**subpath}
+    // Resolves relative to the sender's own subfolder; allows wo users to download their own files.
+    public IResult DownloadMyUpload(HttpContext ctx, string? subpath)
+    {
+        if (!perSender)
+            return Results.NotFound("My Uploads requires --per-sender mode.");
+
+        if (string.IsNullOrEmpty(subpath))
+            return Results.BadRequest("No file specified.");
+
+        var senderKey  = ResolveSenderKey(ctx);
+        var senderRoot = Path.Combine(uploadDir, senderKey);
+
+        string resolved;
+        try
+        {
+            resolved = Path.GetFullPath(Path.Combine(senderRoot, subpath));
+            if (!resolved.StartsWith(uploadDir, StringComparison.OrdinalIgnoreCase))
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        if (!File.Exists(resolved))
+            return Results.NotFound("File not found.");
+
+        var info     = new FileInfo(resolved);
+        var mimeType = MimeTypes.GetMimeType(resolved);
+
+        ctx.Items["fb.file"]  = info.Name;
+        ctx.Items["fb.bytes"] = info.Length;
+
+        FileStream stream;
+        try { stream = new FileStream(resolved, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true); }
+        catch (UnauthorizedAccessException) { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+        catch (IOException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status500InternalServerError); }
+
+        return Results.File(stream, mimeType, info.Name, enableRangeProcessing: true);
+    }
+
+    // GET /admin/uploads  and  GET /admin/uploads/{**subpath}
+    // Read-only browse of the full upload directory. Admin only.
+    public IResult BrowseAdminUploads(HttpContext ctx, string? subpath = null)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        string resolved;
+        try
+        {
+            resolved = string.IsNullOrEmpty(subpath)
+                ? uploadDir
+                : Path.GetFullPath(Path.Combine(uploadDir, subpath));
+
+            if (!resolved.StartsWith(uploadDir, StringComparison.OrdinalIgnoreCase))
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        if (!Directory.Exists(resolved))
+            return Results.NotFound("Directory not found.");
+
+        var relPath = Path.GetRelativePath(uploadDir, resolved).Replace('\\', '/');
+        if (relPath == ".") relPath = "";
+
+        var sort  = ctx.Request.Query["sort"].FirstOrDefault() ?? "name";
+        var order = ctx.Request.Query["order"].FirstOrDefault() ?? "asc";
+        var desc  = string.Equals(order, "desc", StringComparison.OrdinalIgnoreCase);
+
+        var dirs = Directory.GetDirectories(resolved).Select(d => new DirectoryInfo(d));
+        dirs = sort switch
+        {
+            "date" => desc ? dirs.OrderByDescending(d => d.LastWriteTime) : dirs.OrderBy(d => d.LastWriteTime),
+            _      => desc ? dirs.OrderByDescending(d => d.Name)           : dirs.OrderBy(d => d.Name)
+        };
+
+        var files = Directory.GetFiles(resolved).Select(f => new FileInfo(f));
+        files = sort switch
+        {
+            "size" => desc ? files.OrderByDescending(f => f.Length)        : files.OrderBy(f => f.Length),
+            "date" => desc ? files.OrderByDescending(f => f.LastWriteTime) : files.OrderBy(f => f.LastWriteTime),
+            _      => desc ? files.OrderByDescending(f => f.Name)          : files.OrderBy(f => f.Name)
+        };
+
+        var html = HtmlRenderer.RenderDirectory(
+            relPath, dirs.ToList(), files.ToList(),
+            isReadOnly: true,
+            csrfToken, sort, order, role: "admin",
+            separateUploadDir: false,
+            urlBase: "admin/uploads");
+        return Results.Content(html, "text/html");
     }
 
     // GET /events  — Server-Sent Events stream for live reload
