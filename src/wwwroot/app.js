@@ -171,6 +171,39 @@ if (_table) {
   });
 }
 
+// ── Clipboard paste to upload ─────────────────────────────────────────────────
+document.addEventListener('paste', e => {
+  if (!form) return; // ReadOnly mode — uploads disabled
+
+  const items = [...(e.clipboardData?.items || [])];
+  const imageItem = items.find(it => it.kind === 'file' && it.type.startsWith('image/'));
+
+  if (!imageItem) {
+    // Non-image content — silently ignore (text pasting is expected in inputs)
+    return;
+  }
+
+  e.preventDefault();
+  const blob = imageItem.getAsFile();
+  if (!blob) return;
+
+  const now = new Date();
+  const ts  = now.getFullYear() + '-' +
+              String(now.getMonth() + 1).padStart(2,'0') + '-' +
+              String(now.getDate()).padStart(2,'0') + '-' +
+              String(now.getHours()).padStart(2,'0') +
+              String(now.getMinutes()).padStart(2,'0') +
+              String(now.getSeconds()).padStart(2,'0');
+  const ext     = blob.type.split('/')[1]?.replace('jpeg','jpg') || 'png';
+  const defName = `paste-${ts}.${ext}`;
+
+  const name = prompt('Save pasted image as:', defName);
+  if (!name || !name.trim()) return;
+
+  const namedFile = new File([blob], name.trim(), { type: blob.type });
+  uploadFile(namedFile);
+});
+
 // ── File actions (delete / rename) ───────────────────────────────────────────
 function fbDelete(url, name) {
   if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
