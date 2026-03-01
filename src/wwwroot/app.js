@@ -342,11 +342,12 @@ function fbMkDir(pathPrefix) {
 }
 
 // ── Disk space indicator ──────────────────────────────────────────────────────
+const _diskAbort = new AbortController();
 (async function loadDiskInfo() {
   const el = document.getElementById('disk-info');
   if (!el) return;
   try {
-    const r = await fetch('/disk-space');
+    const r = await fetch('/disk-space', { signal: _diskAbort.signal });
     if (!r.ok) return; // 204 No Content (virtual/network drive) — hide silently
     const { availableBytes, totalBytes } = await r.json();
     if (!totalBytes) return;
@@ -361,8 +362,9 @@ function fbMkDir(pathPrefix) {
 })();
 
 // ── Live reload via Server-Sent Events ────────────────────────────────────────
+let _sseSource = null;
 (function connectSSE() {
-  const es = new EventSource('/events');
+  const es = _sseSource = new EventSource('/events');
   es.onmessage = (e) => {
     if (e.data === 'reload') window.location.reload();
   };
@@ -372,3 +374,10 @@ function fbMkDir(pathPrefix) {
     setTimeout(connectSSE, 3000);
   };
 })();
+
+// Close persistent connections when navigating away so the browser's
+// HTTP/1.1 connection pool (≈6 per host) is freed for the next page.
+window.addEventListener('pagehide', () => {
+  _diskAbort.abort();
+  if (_sseSource) { _sseSource.close(); _sseSource = null; }
+});

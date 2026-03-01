@@ -96,6 +96,10 @@ public class RouteHandlers(
     // Best-effort only — not atomic across concurrent uploads from the same sender.
     private readonly ConcurrentDictionary<string, long> _senderQuotas = new();
 
+    // Short-lived cache for GetDirectorySize used by DiskSpace (refreshed at most once per 10 s).
+    private long _dirSizeCached;
+    private long _dirSizeTicks; // Environment.TickCount64 at last refresh
+
     // In-memory share token store: token → (resolved file path, expiry, creator username).
     private readonly ConcurrentDictionary<string, (string FilePath, DateTimeOffset Expiry, string Creator)> _shareTokens = new();
 
@@ -656,8 +660,13 @@ public class RouteHandlers(
 
         if (maxUploadBytesTotal > 0)
         {
-            var used      = GetDirectorySize(uploadDir);
-            var remaining = Math.Max(0L, maxUploadBytesTotal - used);
+            var now = Environment.TickCount64;
+            if (now - _dirSizeTicks > 10_000)
+            {
+                _dirSizeCached = GetDirectorySize(uploadDir);
+                _dirSizeTicks  = now;
+            }
+            var remaining = Math.Max(0L, maxUploadBytesTotal - _dirSizeCached);
             available = available.HasValue ? Math.Min(available.Value, remaining) : remaining;
             total     = total.HasValue    ? Math.Min(total.Value, maxUploadBytesTotal) : maxUploadBytesTotal;
         }
