@@ -656,6 +656,38 @@ public sealed class RouteHandlersTests : IDisposable
         Assert.Equal(403, StatusCode(result));
     }
 
+    // ── DownloadAdminUpload ───────────────────────────────────────────────────
+
+    [Fact]
+    public void DownloadAdminUpload_NonAdmin_Returns403()
+    {
+        var result = _handlers.DownloadAdminUpload(MakeContext(), "file.txt");
+        Assert.Equal(403, StatusCode(result));
+    }
+
+    [Fact]
+    public async Task DownloadAdminUpload_ExistingFile_Admin_Returns200()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_uploadDir, "report.txt"), "data");
+
+        var result = _handlers.DownloadAdminUpload(MakeAdminContext(), "report.txt");
+        Assert.Equal(200, await ExecuteAsync(result));
+    }
+
+    [Fact]
+    public void DownloadAdminUpload_FileNotFound_Returns404()
+    {
+        var result = _handlers.DownloadAdminUpload(MakeAdminContext(), "missing.txt");
+        Assert.Equal(404, StatusCode(result));
+    }
+
+    [Fact]
+    public void DownloadAdminUpload_PathTraversal_Returns403()
+    {
+        var result = _handlers.DownloadAdminUpload(MakeAdminContext(), "../../etc/passwd");
+        Assert.Equal(403, StatusCode(result));
+    }
+
     // ── Revocation endpoints ──────────────────────────────────────────────────
 
     [Fact]

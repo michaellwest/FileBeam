@@ -819,9 +819,8 @@ public class RouteHandlers(
         var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, showHome: true);
         var html = HtmlRenderer.RenderDirectory(
             relPath, dirs.ToList(), files.ToList(),
-            isReadOnly: true,  // no upload form in this view — uploads go through /upload
-            csrfToken, sort, order, role,
-            separateUploadDir: false,
+            isReadOnly, csrfToken, sort, order, role,
+            separateUploadDir: false,  // files uploaded here DO appear in this view
             urlBase: "my-uploads",
             navLinks: navLinks);
         return Results.Content(html, "text/html");
@@ -844,6 +843,42 @@ public class RouteHandlers(
         try
         {
             resolved = Path.GetFullPath(Path.Combine(senderRoot, subpath));
+            if (!resolved.StartsWith(uploadDir, StringComparison.OrdinalIgnoreCase))
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        if (!File.Exists(resolved))
+            return Results.NotFound("File not found.");
+
+        var info     = new FileInfo(resolved);
+        var mimeType = MimeTypes.GetMimeType(resolved);
+
+        ctx.Items["fb.file"]  = info.Name;
+        ctx.Items["fb.bytes"] = info.Length;
+
+        FileStream stream;
+        try { stream = new FileStream(resolved, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true); }
+        catch (UnauthorizedAccessException) { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+        catch (IOException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status500InternalServerError); }
+
+        return Results.File(stream, mimeType, info.Name, enableRangeProcessing: true);
+    }
+
+    // GET /admin/uploads/download/{**subpath}
+    // Resolves relative to uploadDir; admin only.
+    public IResult DownloadAdminUpload(HttpContext ctx, string? subpath)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (string.IsNullOrEmpty(subpath))
+            return Results.BadRequest("No file specified.");
+
+        string resolved;
+        try
+        {
+            resolved = Path.GetFullPath(Path.Combine(uploadDir, subpath));
             if (!resolved.StartsWith(uploadDir, StringComparison.OrdinalIgnoreCase))
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
         }

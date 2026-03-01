@@ -24,17 +24,17 @@ public static class HtmlRenderer
         // Uploads always target root regardless of which URL was visited.
         var isWo      = role == "wo";
         var isRo      = role == "ro";
-        var canUpload = !isReadOnly && !isRo && string.IsNullOrEmpty(urlBase);
+        var canUpload = !isReadOnly && !isRo;
         var isAdmin   = role == "admin";
         var uploadSegs = isWo ? [] : segments;   // wo users always upload to root
 
         string uploadSection;
         if (canUpload)
             uploadSection = BuildUploadSection(uploadSegs, isAdmin, isWo, separateUploadDir);
-        else if (isRo && string.IsNullOrEmpty(urlBase))
+        else if (isRo)
             uploadSection = BuildRoNotice();
         else
-            uploadSection = "";  // read-only view or alternate url base
+            uploadSection = "";  // global --readonly
 
         var bodyClass = isWo ? "role-wo" : "";
 
