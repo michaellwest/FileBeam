@@ -122,6 +122,7 @@ public static class HtmlRenderer
             var shareUrl  = "/share/"    + UrlPath(segments, file.Name);
             var name      = HttpUtility.HtmlEncode(file.Name);
             var nameJs    = HttpUtility.JavaScriptStringEncode(file.Name);
+            var extJs     = HttpUtility.JavaScriptStringEncode(file.Extension.ToLowerInvariant());
             var size      = FormatSize(file.Length);
             var modif     = file.LastWriteTime.ToString("yyyy-MM-dd HH:mm");
             var icon      = FileIcon(file.Extension);
@@ -131,6 +132,7 @@ public static class HtmlRenderer
                       <td class="size">{size}</td>
                       <td class="modified">{modif}</td>
                       <td class="actions">
+                        <button class="act-btn" title="Preview" onclick="fbPreview('{href}','{nameJs}','{extJs}')">👁️</button>
                         <button class="act-btn" title="Share link" onclick="fbShare('{shareUrl}')">🔗</button>
                         <button class="act-btn" title="Rename" onclick="fbRename('{renameUrl}','{nameJs}')">✏️</button>
                         <button class="act-btn" title="Delete" onclick="fbDelete('{deleteUrl}','{name}')">🗑️</button>

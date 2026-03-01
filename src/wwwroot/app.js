@@ -151,6 +151,57 @@ function fbRename(url, currentName) {
   f.submit();
 }
 
+// ── File preview panel ────────────────────────────────────────────────────────
+const _previewPanel    = document.getElementById('preview-panel');
+const _previewContent  = document.getElementById('preview-content');
+const _previewTitle    = document.getElementById('preview-title');
+const _previewDownload = document.getElementById('preview-download');
+
+const IMG_EXTS   = new Set(['.jpg','.jpeg','.png','.gif','.webp','.svg']);
+const TEXT_EXTS  = new Set(['.txt','.md','.log','.csv','.json','.xml','.yaml','.yml','.toml','.ini','.sh','.bat','.ps1','.cs','.js','.ts','.py','.go','.rs','.html','.css']);
+const VIDEO_EXTS = new Set(['.mp4','.webm']);
+const PDF_EXTS   = new Set(['.pdf']);
+
+function fbPreview(url, name, ext) {
+  _previewTitle.textContent = name;
+  _previewDownload.href     = url;
+  _previewContent.innerHTML = '';
+
+  if (IMG_EXTS.has(ext)) {
+    const img = document.createElement('img');
+    img.src = url; img.alt = name;
+    _previewContent.appendChild(img);
+  } else if (VIDEO_EXTS.has(ext)) {
+    const v = document.createElement('video');
+    v.src = url; v.controls = true;
+    _previewContent.appendChild(v);
+  } else if (PDF_EXTS.has(ext)) {
+    const fr = document.createElement('iframe');
+    fr.src = url;
+    _previewContent.appendChild(fr);
+  } else if (TEXT_EXTS.has(ext)) {
+    fetch(url).then(r => r.text()).then(text => {
+      const pre = document.createElement('pre');
+      pre.textContent = text;
+      _previewContent.appendChild(pre);
+    }).catch(() => {
+      _previewContent.innerHTML = '<p style="color:#888">Could not load file.</p>';
+    });
+  } else {
+    _previewContent.innerHTML =
+      `<p style="color:#888">Preview not available. <a href="${url}">Download</a> the file instead.</p>`;
+  }
+  _previewPanel.hidden = false;
+}
+
+function _closePreview() {
+  _previewPanel.hidden = true;
+  _previewContent.innerHTML = '';
+}
+document.getElementById('preview-close').addEventListener('click', _closePreview);
+document.getElementById('preview-backdrop').addEventListener('click', _closePreview);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') _closePreview(); });
+
 // ── Share link ────────────────────────────────────────────────────────────────
 async function fbShare(url) {
   const fd = new FormData();

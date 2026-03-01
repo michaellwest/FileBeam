@@ -133,6 +133,37 @@
     }
     tr:hover .act-btn { opacity: 1; }
     .act-btn:hover { background: #252836; }
+    /* ── Preview panel ── */
+    #preview-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,.65); z-index: 100;
+    }
+    #preview-box {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      z-index: 101; background: #1a1d27; border-radius: 10px;
+      width: min(92vw, 900px); max-height: 90vh;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    #preview-header {
+      display: flex; align-items: center; gap: .75rem;
+      padding: .75rem 1rem; background: #222536; flex-shrink: 0;
+    }
+    #preview-title { flex: 1; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #preview-download { font-size: .82rem; color: #5ba4f5; white-space: nowrap; }
+    #preview-close {
+      background: none; border: none; color: #aaa; font-size: 1.1rem;
+      cursor: pointer; padding: .1rem .4rem; border-radius: 3px;
+    }
+    #preview-close:hover { background: #333; color: #fff; }
+    #preview-content {
+      overflow: auto; padding: 1rem; flex: 1;
+      display: flex; align-items: flex-start; justify-content: center;
+    }
+    #preview-content img, #preview-content video { max-width: 100%; max-height: 75vh; }
+    #preview-content iframe { width: 100%; height: 75vh; border: none; }
+    #preview-content pre {
+      white-space: pre-wrap; word-break: break-all; font-size: .82rem;
+      color: #ccc; font-family: monospace; width: 100%; margin: 0;
+    }
   </style>
 </head>
 <body>
@@ -150,6 +181,18 @@
 </table>
 
 {{UPLOAD_SECTION}}
+
+<div id="preview-panel" hidden>
+  <div id="preview-backdrop"></div>
+  <div id="preview-box">
+    <div id="preview-header">
+      <span id="preview-title"></span>
+      <a id="preview-download" href="" download>⬇ Download</a>
+      <button id="preview-close">✕</button>
+    </div>
+    <div id="preview-content"></div>
+  </div>
+</div>
 
 <script>
 {{APP_JS}}
