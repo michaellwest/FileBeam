@@ -519,6 +519,41 @@ public class RouteHandlers(
         return Results.Redirect(browseUrl);
     }
 
+    // POST /rename-dir/{**subpath}
+    public async Task<IResult> RenameDir(HttpContext ctx, string? subpath)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (string.IsNullOrEmpty(subpath))
+            return Results.BadRequest("No folder specified.");
+
+        string resolved;
+        try { resolved = SafeResolvePath(subpath); }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        if (string.Equals(resolved, rootDir, StringComparison.OrdinalIgnoreCase))
+            return Results.BadRequest("Cannot rename the root directory.");
+
+        if (!Directory.Exists(resolved))
+            return Results.NotFound("Directory not found.");
+
+        var form    = await ctx.Request.ReadFormAsync();
+        var newName = Path.GetFileName(form["newname"].ToString());
+        if (string.IsNullOrWhiteSpace(newName))
+            return Results.BadRequest("No new name provided.");
+
+        var newPath = Path.Combine(Path.GetDirectoryName(resolved)!, newName);
+        if (Directory.Exists(newPath))
+            return Results.Conflict("A folder with that name already exists.");
+
+        Directory.Move(resolved, newPath);
+
+        var parentSubpath = Path.GetDirectoryName(subpath)?.Replace('\\', '/');
+        var browseUrl = string.IsNullOrEmpty(parentSubpath) ? "/" : $"/browse/{parentSubpath}";
+        return Results.Redirect(browseUrl);
+    }
+
     // POST /rename/{**subpath}
     public async Task<IResult> RenameFile(HttpContext ctx, string? subpath)
     {
