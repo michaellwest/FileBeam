@@ -10,16 +10,17 @@ using QRCoder;
 using Spectre.Console;
 
 // ── Parse CLI args ─────────────────────────────────────────────────────────────
-string? cliDownloadDir = null;
-string? cliUploadDir   = null;
-string? cliPassword    = null;
-int?    cliPort        = null;
-bool    readOnly       = false;
-bool    perSender      = false;
-long    maxFileSize    = 0;   // bytes; 0 = unlimited
-long    maxUploadBytes = 0;   // per-sender cumulative bytes; 0 = unlimited
-int     rateLimit      = 60;  // requests per minute per IP
-string  logLevel       = "info"; // info | debug
+string? cliDownloadDir      = null;
+string? cliUploadDir        = null;
+string? cliPassword         = null;
+string? cliCredentialsFile  = null;
+int?    cliPort             = null;
+bool    readOnly            = false;
+bool    perSender           = false;
+long    maxFileSize         = 0;   // bytes; 0 = unlimited
+long    maxUploadBytes      = 0;   // per-sender cumulative bytes; 0 = unlimited
+int     rateLimit           = 60;  // requests per minute per IP
+string  logLevel            = "info"; // info | debug
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -31,6 +32,8 @@ for (int i = 0; i < args.Length; i++)
         cliPort = int.TryParse(args[++i], out var p) ? p : null;
     else if ((args[i] == "--password"    || args[i] == "--pw")  && i + 1 < args.Length)
         cliPassword = args[++i];
+    else if (args[i] == "--credentials-file"                    && i + 1 < args.Length)
+        cliCredentialsFile = args[++i];
     else if (args[i] == "--readonly"     || args[i] == "-r")
         readOnly = true;
     else if (args[i] == "--per-sender")
@@ -57,6 +60,8 @@ string serveDir = cliDownloadDir ?? (interactive
     ? AnsiConsole.Ask<string>("[bold]Download directory[/] [grey][[press Enter for current]][/]:", cwd)
     : cwd);
 
+serveDir = Path.GetFullPath(serveDir);
+
 if (!Directory.Exists(serveDir))
 {
     AnsiConsole.MarkupLine($"[red]Directory not found:[/] {serveDir}");
@@ -69,12 +74,24 @@ string uploadDir = cliUploadDir ?? (interactive
     ? AnsiConsole.Ask<string>("[bold]Upload directory[/] [grey][[press Enter for same as download]][/]:", serveDir)
     : serveDir);
 
+uploadDir = Path.GetFullPath(uploadDir);
+
 if (!Directory.Exists(uploadDir))
     Directory.CreateDirectory(uploadDir);
 
 int port = cliPort ?? (interactive ? AnsiConsole.Ask("[bold]Port[/]:", 8080) : 8080);
 
 string? password = cliPassword;
+
+// ── Load per-user credentials file (optional) ─────────────────────────────────
+IReadOnlyDictionary<string, string> userCredentials = new Dictionary<string, string>();
+if (!string.IsNullOrEmpty(cliCredentialsFile))
+{
+    if (!File.Exists(cliCredentialsFile))
+        AnsiConsole.MarkupLine($"[yellow]Warning:[/] credentials file not found: {cliCredentialsFile}");
+    else
+        userCredentials = CredentialStore.LoadFile(cliCredentialsFile);
+}
 
 // ── Resolve LAN IPs ────────────────────────────────────────────────────────────
 var ips = NetworkInterface.GetAllNetworkInterfaces()
@@ -96,8 +113,11 @@ var panel = new Panel(
         (perSender    ? "[bold]Upload:[/]   Per-sender folders\n" : "") +
         (readOnly     ? "[bold yellow]Mode:[/]     Read-only (uploads disabled)\n" : "") +
         (logLevel != "info" ? $"[bold]Log:[/]      {logLevel}\n" : "") +
+        (userCredentials.Count > 0
+            ? $"[bold]Auth:[/]     {userCredentials.Count} per-user credential{(userCredentials.Count == 1 ? "" : "s")} loaded [yellow](HTTP — credentials unencrypted)[/]\n"
+            : "") +
         (!string.IsNullOrEmpty(password)
-            ? "[bold]Auth:[/]     Password required [yellow](HTTP — credentials unencrypted)[/]\n"
+            ? "[bold]Auth:[/]     Shared password required [yellow](HTTP — credentials unencrypted)[/]\n"
             : "") +
         string.Join("\n", ips.Select(ip => $"[bold]URL:[/]      [link]http://{ip}:{port}[/]")) +
         (ips.Count == 0 ? $"\n[bold]URL:[/]      http://localhost:{port}" : ""))))
@@ -254,7 +274,8 @@ static string FormatBytes(long bytes) => bytes switch
 app.UseRateLimiter();
 
 // ── Basic Auth + brute-force lockout (optional) ───────────────────────────────
-if (!string.IsNullOrEmpty(password))
+bool authRequired = !string.IsNullOrEmpty(password) || userCredentials.Count > 0;
+if (authRequired)
 {
     // Per-IP failed-attempt tracking.  Entries are trimmed when the dict grows large
     // to prevent unbounded memory growth from spoofed source IPs.
@@ -289,15 +310,20 @@ if (!string.IsNullOrEmpty(password))
         {
             try
             {
-                var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(header[6..]));
-                var colon   = decoded.IndexOf(':');
+                var decoded  = Encoding.UTF8.GetString(Convert.FromBase64String(header[6..]));
+                var colon    = decoded.IndexOf(':');
                 if (colon >= 0)
                 {
-                    // Constant-time comparison to prevent timing attacks
-                    var submitted = Encoding.UTF8.GetBytes(decoded[(colon + 1)..]);
-                    var expected  = Encoding.UTF8.GetBytes(password);
-                    if (CryptographicOperations.FixedTimeEquals(submitted, expected))
-                        authenticated = true;
+                    var submittedUser = decoded[..colon];
+                    var submittedPass = decoded[(colon + 1)..];
+
+                    // 1. Check per-user credentials (username AND password must match)
+                    if (userCredentials.TryGetValue(submittedUser, out var expectedPass))
+                        authenticated = CredentialStore.VerifyPassword(submittedPass, expectedPass);
+
+                    // 2. Fall back to shared password (any username accepted)
+                    if (!authenticated && !string.IsNullOrEmpty(password))
+                        authenticated = CredentialStore.VerifyPassword(submittedPass, password);
                 }
             }
             catch { /* malformed Base64 — fall through to 401 */ }
