@@ -660,6 +660,7 @@ app.MapPost("/rename-dir/{**subpath}", handlers.RenameDir);
 app.MapPost("/share/{**subpath}",   handlers.CreateShareLink);
 app.MapGet("/s/{token}",            handlers.RedeemShareLink);
 app.MapPost("/mkdir/{**subpath}",   handlers.MkDir);
+app.MapGet("/upload-area",          handlers.BrowseUploadArea);
 app.MapGet("/disk-space",           handlers.DiskSpace);
 app.MapGet("/events",               handlers.FileEvents);
 
