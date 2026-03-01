@@ -79,6 +79,7 @@ public class RouteHandlers(
     bool perSender = false,
     long maxFileSize = 0,
     long maxUploadBytesPerSender = 0,
+    long maxUploadBytesTotal = 0,
     int maxDirDepth = 10,
     int maxFilesPerDir = 1000,
     string csrfToken = "",
@@ -179,6 +180,25 @@ public class RouteHandlers(
             catch { /* malformed — fall through */ }
         }
         return SanitizeName(ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+    }
+
+    /// <summary>
+    /// Returns the total byte size of all files under <paramref name="dir"/> recursively.
+    /// Inaccessible files are skipped so the count is best-effort.
+    /// </summary>
+    private static long GetDirectorySize(string dir)
+    {
+        long total = 0;
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+            {
+                try { total += new FileInfo(file).Length; }
+                catch { /* skip inaccessible file */ }
+            }
+        }
+        catch { /* directory unreadable */ }
+        return total;
     }
 
     /// <summary>Replaces characters that are invalid in file/folder names with underscores.</summary>
@@ -313,11 +333,19 @@ public class RouteHandlers(
         if (existingCount + form.Files.Count > maxFilesPerDir)
             return Results.StatusCode(StatusCodes.Status507InsufficientStorage);
 
-        // Enforce per-sender cumulative upload quota (best-effort; not atomic across concurrent requests)
+        // Enforce total upload directory cap (best-effort; not atomic across concurrent requests)
         var senderKey = ResolveSenderKey(ctx);
+        var pending   = form.Files.Sum(f => f.Length);
+        if (maxUploadBytesTotal > 0)
+        {
+            var dirBytes = GetDirectorySize(uploadDir);
+            if (dirBytes + pending > maxUploadBytesTotal)
+                return Results.StatusCode(StatusCodes.Status507InsufficientStorage);
+        }
+
+        // Enforce per-sender cumulative upload quota (best-effort; not atomic across concurrent requests)
         if (maxUploadBytesPerSender > 0)
         {
-            var pending = form.Files.Sum(f => f.Length);
             var already = _senderQuotas.GetOrAdd(senderKey, 0L);
             if (already + pending > maxUploadBytesPerSender)
                 return Results.StatusCode(StatusCodes.Status429TooManyRequests);

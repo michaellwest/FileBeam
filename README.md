@@ -45,6 +45,8 @@ filebeam.exe --download "./share/download" --port 9000
 | `--readonly`           | `-r`   | _(off)_              | Disable uploads; hide the upload form                             |
 | `--per-sender`         |        | _(off)_              | Bucket uploads into per-sender subfolders inside `--upload`       |
 | `--max-upload-size`    |        | _(none)_             | Max request body size: `100MB`, `2GB`, `unlimited`                |
+| `--max-upload-bytes`   |        | _(none)_             | Per-sender cumulative upload quota: `2GB`, `500MB`, `unlimited`   |
+| `--max-upload-total`   |        | _(none)_             | Total upload directory cap (all senders): `10GB`, `500MB`         |
 | `--tls-cert`           |        | _(none)_             | Path to TLS certificate PEM file (must be used with `--tls-key`)  |
 | `--tls-key`            |        | _(none)_             | Path to TLS private key PEM file (must be used with `--tls-cert`) |
 | `--log-level`          |        | `info`               | Console verbosity: `info` (default) or `debug`                    |
