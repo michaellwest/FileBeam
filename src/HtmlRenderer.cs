@@ -36,7 +36,7 @@ public static class HtmlRenderer
 
         string uploadSection;
         if (showUploadHere)
-            uploadSection = BuildUploadSection(uploadSegs, isAdmin, isWo);
+            uploadSection = BuildUploadSection(uploadSegs, isAdmin, isWo, urlBase);
         else if (canUpload && separateUploadDir)
             uploadSection = BuildUploadRedirectNotice(perSender);
         else if (isRo)
@@ -114,11 +114,15 @@ public static class HtmlRenderer
     private static string BuildUploadSection(
         string[] segments,
         bool isAdmin = false,
-        bool isWo = false)
+        bool isWo = false,
+        string urlBase = "")
     {
+        // Use /{urlBase}/upload/{path} when rendering inside a scoped view (e.g. my-uploads)
+        // so the handler can redirect back to the correct listing after upload.
+        var uploadPrefix = string.IsNullOrEmpty(urlBase) ? "/upload/" : $"/{urlBase}/upload/";
         var uploadAction = segments.Length == 0
-            ? "/upload/"
-            : "/upload/" + string.Join("/", segments.Select(Uri.EscapeDataString));
+            ? uploadPrefix
+            : uploadPrefix + string.Join("/", segments.Select(Uri.EscapeDataString));
 
         var mkdirBase = System.Web.HttpUtility.JavaScriptStringEncode(
             segments.Length == 0 ? "" : string.Join("/", segments.Select(Uri.EscapeDataString)));
