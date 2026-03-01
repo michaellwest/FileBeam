@@ -9,3 +9,6 @@ obj/
 .claude/settings.local.json
 
 share/**/*
+
+# Claude Worklog
+.claude_worklog.md

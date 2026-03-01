@@ -35,14 +35,15 @@ When running non-interactively (e.g. inside a container with no TTY), all prompt
 filebeam.exe --download "./share/download" --port 9000
 ```
 
-| Flag           | Short  | Default              | Description                                                  |
-| -------------- | ------ | -------------------- | ------------------------------------------------------------ |
-| `--download`   | `-s`   | Current directory    | Directory to browse and serve                                |
-| `--upload`     | `-d`   | Same as `--download` | Upload destination (private; not visible to browsers)        |
-| `--port`       | `-p`   | `8080`               | Port to listen on                                            |
-| `--password`   | `--pw` | _(none)_             | Require this password via Basic Auth (any username accepted) |
-| `--readonly`   | `-r`   | _(off)_              | Disable uploads; hide the upload form                        |
-| `--per-sender` |        | _(off)_              | Bucket uploads into per-sender subfolders inside `--upload`  |
+| Flag            | Short  | Default              | Description                                                  |
+| --------------- | ------ | -------------------- | ------------------------------------------------------------ |
+| `--download`    | `-s`   | Current directory    | Directory to browse and serve                                |
+| `--upload`      | `-d`   | Same as `--download` | Upload destination (private; not visible to browsers)        |
+| `--port`        | `-p`   | `8080`               | Port to listen on                                            |
+| `--password`    | `--pw` | _(none)_             | Require this password via Basic Auth (any username accepted) |
+| `--readonly`    | `-r`   | _(off)_              | Disable uploads; hide the upload form                        |
+| `--per-sender`  |        | _(off)_              | Bucket uploads into per-sender subfolders inside `--upload`  |
+| `--log-level`   |        | `info`               | Console verbosity: `info` (default) or `debug`               |
 
 #### Per-sender upload folders
 

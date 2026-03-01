@@ -19,6 +19,7 @@ bool    perSender      = false;
 long    maxFileSize    = 0;   // bytes; 0 = unlimited
 long    maxUploadBytes = 0;   // per-sender cumulative bytes; 0 = unlimited
 int     rateLimit      = 60;  // requests per minute per IP
+string  logLevel       = "info"; // info | debug
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -40,6 +41,8 @@ for (int i = 0; i < args.Length; i++)
         maxUploadBytes = long.TryParse(args[++i], out var mu) ? mu : 0;
     else if (args[i] == "--rate-limit"   && i + 1 < args.Length)
         rateLimit = int.TryParse(args[++i], out var rl) ? rl : 60;
+    else if (args[i] == "--log-level"   && i + 1 < args.Length)
+        logLevel = args[++i].ToLowerInvariant();
 }
 
 // ── Banner ─────────────────────────────────────────────────────────────────────
@@ -92,6 +95,7 @@ var panel = new Panel(
         (separateDrop ? $"[bold]Upload:[/]   {uploadDir}\n" : "") +
         (perSender    ? "[bold]Upload:[/]   Per-sender folders\n" : "") +
         (readOnly     ? "[bold yellow]Mode:[/]     Read-only (uploads disabled)\n" : "") +
+        (logLevel != "info" ? $"[bold]Log:[/]      {logLevel}\n" : "") +
         (!string.IsNullOrEmpty(password)
             ? "[bold]Auth:[/]     Password required [yellow](HTTP — credentials unencrypted)[/]\n"
             : "") +
@@ -156,13 +160,23 @@ var app = builder.Build();
 
 // Wire up FileWatcher and route handlers
 using var fileWatcher = new FileWatcher(serveDir, maxSseConnections: 50);
+
+Action<string, string>? debugLog = logLevel == "debug"
+    ? (reqId, msg) =>
+      {
+          var t = DateTime.UtcNow.ToString("o");
+          AnsiConsole.MarkupLine($"[grey]{t}[/]  [dim][[DBG]][/]   [grey][[{reqId}]][/]  [grey]---[/]  [grey]---[/]  {Markup.Escape(msg)}");
+      }
+    : null;
+
 var handlers = new RouteHandlers(
     serveDir, uploadDir, fileWatcher,
     isReadOnly:             readOnly,
     perSender:              perSender,
     maxFileSize:            maxFileSize,
     maxUploadBytesPerSender:maxUploadBytes,
-    csrfToken:              csrfToken);
+    csrfToken:              csrfToken,
+    debugLog:               debugLog);
 
 // ── Console request log (with elapsed time) ──────────────────────────────────
 // Must be registered before route mappings so it wraps endpoint execution.
@@ -172,35 +186,60 @@ var handlers = new RouteHandlers(
 // UseDeveloperExceptionPage masks the error).
 app.Use(async (ctx, next) =>
 {
-    var sw = Stopwatch.StartNew();
-    await next();
-    sw.Stop();
+    var sw        = Stopwatch.StartNew();
+    var requestId = Guid.NewGuid().ToString("N")[..8];
+    ctx.Items["fb.request.id"] = requestId;
 
-    // Suppress noisy SSE keepalive log entries
-    if (ctx.Request.Path == "/events") return;
-
-    var ip     = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
-    var method = ctx.Request.Method;
-    var path   = ctx.Request.Path.Value ?? "/";
-    var status = ctx.Response.StatusCode;
-    var color  = status >= 400 ? "red" : status >= 300 ? "yellow" : "green";
-    var time   = DateTime.Now.ToString("HH:mm:ss");
-
-    // Build optional transfer info suffix (file name + size for uploads/downloads)
-    string transfer = "";
-    if (ctx.Items.TryGetValue("fb.bytes", out var bytesObj) && bytesObj is long bytes)
+    // Emit an "upload started" line before the body streams in so large uploads
+    // are visible in the console while they're in flight.
+    if (ctx.Request.Method == "POST" && ctx.Request.Path.StartsWithSegments("/upload"))
     {
-        var size = FormatBytes(bytes);
-        if (ctx.Items.TryGetValue("fb.count", out var countObj) && countObj is int count && count > 1)
-            transfer = $"  [grey]{count} files  {size}[/]";
-        else if (ctx.Items.TryGetValue("fb.file", out var fileObj) && fileObj is string fileName)
-            transfer = $"  [grey]{Markup.Escape(fileName)}  {size}[/]";
-        else
-            transfer = $"  [grey]{size}[/]";
+        var startIp   = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
+        var startPath = ctx.Request.Path.Value ?? "/";
+        var startTime = DateTime.UtcNow.ToString("o");
+        AnsiConsole.MarkupLine(
+            $"[grey]{startTime}[/]  [blue][[INFO]][/]  [grey][[{requestId}]][/]  [grey]---[/]  [bold]POST[/]  {Markup.Escape(startPath)}  [grey]{startIp}  uploading…[/]");
     }
 
-    AnsiConsole.MarkupLine(
-        $"[grey]{time}[/]  [{color}]{status}[/]  [bold]{method,-6}[/] {Markup.Escape(path)}{transfer}  [grey]{ip}  {sw.ElapsedMilliseconds}ms[/]");
+    Exception? unhandled = null;
+    try { await next(); }
+    catch (OperationCanceledException) { throw; }
+    catch (Exception ex) { unhandled = ex; throw; }
+    finally
+    {
+        sw.Stop();
+
+        // Suppress noisy SSE keepalive log entries
+        if (ctx.Request.Path != "/events")
+        {
+            var ip     = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
+            var method = ctx.Request.Method;
+            var path   = ctx.Request.Path.Value ?? "/";
+            var status = unhandled is not null ? 500 : ctx.Response.StatusCode;
+            var color  = status >= 400 ? "red" : status >= 300 ? "yellow" : "green";
+            var time   = DateTime.UtcNow.ToString("o");
+
+            // Build optional transfer info suffix (file name + size for uploads/downloads)
+            string transfer = "";
+            if (unhandled is null && ctx.Items.TryGetValue("fb.bytes", out var bytesObj) && bytesObj is long bytes)
+            {
+                var size = FormatBytes(bytes);
+                if (ctx.Items.TryGetValue("fb.count", out var countObj) && countObj is int count && count > 1)
+                    transfer = $"  [grey]{count} files  {size}[/]";
+                else if (ctx.Items.TryGetValue("fb.file", out var fileObj) && fileObj is string fileName)
+                    transfer = $"  [grey]{Markup.Escape(fileName)}  {size}[/]";
+                else
+                    transfer = $"  [grey]{size}[/]";
+            }
+
+            var exInfo = unhandled is not null
+                ? $"  [red]{Markup.Escape(unhandled.GetType().Name)}: {Markup.Escape(unhandled.Message)}[/]"
+                : "";
+
+            AnsiConsole.MarkupLine(
+                $"[grey]{time}[/]  [grey][[INFO]][/]  [grey][[{requestId}]][/]  [{color}]{status}[/]  [bold]{method}[/]  {Markup.Escape(path)}{transfer}{exInfo}  [grey]{ip}  {sw.ElapsedMilliseconds}ms[/]");
+        }
+    }
 });
 
 static string FormatBytes(long bytes) => bytes switch

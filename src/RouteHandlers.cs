@@ -80,7 +80,8 @@ public class RouteHandlers(
     long maxUploadBytesPerSender = 0,
     int maxDirDepth = 10,
     int maxFilesPerDir = 1000,
-    string csrfToken = "")
+    string csrfToken = "",
+    Action<string, string>? debugLog = null)
 {
     // Tracks cumulative bytes uploaded per sender key (IP or username).
     // Best-effort only — not atomic across concurrent uploads from the same sender.
@@ -194,7 +195,7 @@ public class RouteHandlers(
     {
         string resolved;
         try { resolved = SafeResolvePath(subpath); }
-        catch { return Results.Forbid(); }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
 
         if (!Directory.Exists(resolved))
             return Results.NotFound("Directory not found.");
@@ -217,7 +218,7 @@ public class RouteHandlers(
 
         string resolved;
         try { resolved = SafeResolvePath(subpath); }
-        catch { return Results.Forbid(); }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
 
         if (!File.Exists(resolved))
             return Results.NotFound("File not found.");
@@ -228,7 +229,11 @@ public class RouteHandlers(
         ctx.Items["fb.file"]  = info.Name;
         ctx.Items["fb.bytes"] = info.Length;
 
-        var stream = new FileStream(resolved, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
+        FileStream stream;
+        try { stream = new FileStream(resolved, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true); }
+        catch (UnauthorizedAccessException) { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+        catch (IOException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status500InternalServerError); }
+
         return Results.File(stream, mimeType, info.Name, enableRangeProcessing: true);
     }
 
@@ -247,7 +252,7 @@ public class RouteHandlers(
 
         string resolved;
         try { resolved = SafeResolveUploadPath(subpath, dropRoot); }
-        catch { return Results.Forbid(); }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
 
         // Enforce maximum directory depth relative to the upload root
         var depth = resolved.Split(Path.DirectorySeparatorChar).Length
@@ -310,6 +315,10 @@ public class RouteHandlers(
             var finalName = ResolveUniqueFileName(resolved, safeName);
             var dest      = Path.Combine(resolved, finalName);
             var partDest  = dest + ".part";
+            var uploadId  = ctx.Items.TryGetValue("fb.request.id", out var idObj) ? idObj as string : null;
+            var uploadDirName = Path.GetFileName(uploadDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            var relPartDest   = "/" + uploadDirName + "/" + Path.GetRelativePath(uploadDir, partDest).Replace('\\', '/');
+            debugLog?.Invoke(uploadId ?? "?", relPartDest);
 
             try
             {
@@ -376,7 +385,7 @@ public class RouteHandlers(
 
         string resolved;
         try { resolved = SafeResolvePath(subpath); }
-        catch { return Results.Forbid(); }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
 
         if (!File.Exists(resolved))
             return Results.NotFound("File not found.");
@@ -396,7 +405,7 @@ public class RouteHandlers(
 
         string resolved;
         try { resolved = SafeResolvePath(subpath); }
-        catch { return Results.Forbid(); }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
 
         if (!File.Exists(resolved))
             return Results.NotFound("File not found.");
