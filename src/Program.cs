@@ -20,6 +20,7 @@ bool    readOnly            = false;
 bool    perSender           = false;
 long    maxFileSize         = 0;   // bytes; 0 = unlimited
 long    maxUploadBytes      = 0;   // per-sender cumulative bytes; 0 = unlimited
+long    maxUploadTotal      = 0;   // total upload directory cap; 0 = unlimited
 long?   maxUploadSize       = null; // null = keep large default; 0 = unlimited
 string? cliTlsCert          = null;
 string? cliTlsKey           = null;
@@ -48,7 +49,27 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--max-file-size"  && i + 1 < args.Length)
         maxFileSize = long.TryParse(args[++i], out var mf) ? mf : 0;
     else if (args[i] == "--max-upload-bytes" && i + 1 < args.Length)
-        maxUploadBytes = long.TryParse(args[++i], out var mu) ? mu : 0;
+    {
+        var raw = args[++i];
+        if (!TryParseSize(raw, out var parsed))
+        {
+            AnsiConsole.MarkupLine($"[red]Error:[/] --max-upload-bytes invalid value '{Markup.Escape(raw)}'. " +
+                "Use e.g. 500MB, 2GB, 100KB, or 'unlimited'.");
+            return 1;
+        }
+        maxUploadBytes = parsed;
+    }
+    else if (args[i] == "--max-upload-total" && i + 1 < args.Length)
+    {
+        var raw = args[++i];
+        if (!TryParseSize(raw, out var parsed))
+        {
+            AnsiConsole.MarkupLine($"[red]Error:[/] --max-upload-total invalid value '{Markup.Escape(raw)}'. " +
+                "Use e.g. 10GB, 500MB, or 'unlimited'.");
+            return 1;
+        }
+        maxUploadTotal = parsed;
+    }
     else if (args[i] == "--max-upload-size" && i + 1 < args.Length)
     {
         var raw = args[++i];
@@ -254,6 +275,8 @@ var panel = new Panel(
         $"[bold]Download:[/] {serveDir}\n" +
         (separateDrop ? $"[bold]Upload:[/]   {uploadDir}\n" : "") +
         (perSender    ? "[bold]Upload:[/]   Per-sender folders\n" : "") +
+        (maxUploadBytes > 0 ? $"[bold]Quota:[/]    {FormatBytes(maxUploadBytes)} per sender\n" : "") +
+        (maxUploadTotal > 0 ? $"[bold]Cap:[/]      {FormatBytes(maxUploadTotal)} total upload directory\n" : "") +
         (readOnly     ? "[bold yellow]Mode:[/]     Read-only (uploads disabled)\n" : "") +
         (logLevel != "info" ? $"[bold]Log:[/]      {logLevel}\n" : "") +
         (tlsCertificate != null ? "[bold green]TLS:[/]      HTTPS enabled\n" : "") +
@@ -365,6 +388,7 @@ var handlers = new RouteHandlers(
     perSender:              perSender,
     maxFileSize:            maxFileSize,
     maxUploadBytesPerSender:maxUploadBytes,
+    maxUploadBytesTotal:    maxUploadTotal,
     csrfToken:              csrfToken,
     shareTtlSeconds:        shareTtl,
     debugLog:               debugLog);
