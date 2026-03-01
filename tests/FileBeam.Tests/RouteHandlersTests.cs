@@ -288,4 +288,68 @@ public sealed class RouteHandlersTests : IDisposable
         var result = await _handlers.RenameFile(MakeFormContext("newname="), "file.txt");
         Assert.Equal(400, StatusCode(result));
     }
+
+    // ── MkDir ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void MkDir_NoSubpath_Returns400()
+    {
+        var result = _handlers.MkDir(MakeContext(), null);
+        Assert.Equal(400, StatusCode(result));
+    }
+
+    [Fact]
+    public void MkDir_ReadOnly_Returns405()
+    {
+        var h = new RouteHandlers(_rootDir, _uploadDir, _watcher, isReadOnly: true);
+        var result = h.MkDir(MakeContext(), "newfolder");
+        Assert.Equal(405, StatusCode(result));
+    }
+
+    [Fact]
+    public async Task MkDir_NewFolder_CreatesDirectoryAndRedirects()
+    {
+        var ctx = MakeContext();
+        var result = _handlers.MkDir(ctx, "newfolder");
+
+        Assert.Equal(302, await ExecuteAsync(result));
+        Assert.True(Directory.Exists(Path.Combine(_rootDir, "newfolder")));
+    }
+
+    [Fact]
+    public async Task MkDir_NestedFolder_RedirectsToBrowsePath()
+    {
+        Directory.CreateDirectory(Path.Combine(_rootDir, "docs"));
+        var ctx = MakeContext();
+        var result = _handlers.MkDir(ctx, "docs/reports");
+
+        await result.ExecuteAsync(ctx);
+        Assert.Equal(302, ctx.Response.StatusCode);
+        Assert.Contains("/browse/docs/reports", ctx.Response.Headers.Location.ToString());
+        Assert.True(Directory.Exists(Path.Combine(_rootDir, "docs", "reports")));
+    }
+
+    [Fact]
+    public void MkDir_AlreadyExists_Returns409()
+    {
+        Directory.CreateDirectory(Path.Combine(_rootDir, "existing"));
+        var result = _handlers.MkDir(MakeContext(), "existing");
+        Assert.Equal(409, StatusCode(result));
+    }
+
+    [Fact]
+    public void MkDir_MissingParent_Returns404()
+    {
+        var result = _handlers.MkDir(MakeContext(), "nonexistent/child");
+        Assert.Equal(404, StatusCode(result));
+    }
+
+    [Theory]
+    [InlineData("../escape")]
+    [InlineData("../../etc")]
+    public void MkDir_PathTraversal_Returns403(string subpath)
+    {
+        var result = _handlers.MkDir(MakeContext(), subpath);
+        Assert.Equal(403, StatusCode(result));
+    }
 }
