@@ -13,19 +13,28 @@ public static class HtmlRenderer
         string csrfToken = "",
         string sort = "name",
         string order = "asc",
-        string role = "rw")
+        string role = "rw",
+        bool separateUploadDir = false)
     {
         var segments = relPath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
 
         // wo = upload-only: show drop zone at root, no listing.
         // Uploads always target root regardless of which URL was visited.
-        var isWo = role == "wo";
+        var isWo      = role == "wo";
+        var isRo      = role == "ro";
+        var canUpload = !isReadOnly && !isRo;
+        var isAdmin   = role == "admin";
+        var uploadSegs = isWo ? [] : segments;   // wo users always upload to root
 
-        var canUpload    = !isReadOnly && role != "ro";
-        var isAdmin      = role == "admin";
-        var uploadSegs   = isWo ? [] : segments;   // wo users always upload to root
-        var uploadSection = canUpload ? BuildUploadSection(uploadSegs, isAdmin) : "";
-        var bodyClass    = isWo ? "role-wo" : "";
+        string uploadSection;
+        if (canUpload)
+            uploadSection = BuildUploadSection(uploadSegs, isAdmin, isWo, separateUploadDir);
+        else if (isRo)
+            uploadSection = BuildRoNotice();
+        else
+            uploadSection = "";  // global --readonly
+
+        var bodyClass = isWo ? "role-wo" : "";
 
         return ResourceLoader.Template
             .Replace("{{PAGE_TITLE}}",      HttpUtility.HtmlEncode(relPath))
@@ -57,7 +66,11 @@ public static class HtmlRenderer
         """;
     }
 
-    private static string BuildUploadSection(string[] segments, bool isAdmin = false)
+    private static string BuildUploadSection(
+        string[] segments,
+        bool isAdmin = false,
+        bool isWo = false,
+        bool separateUploadDir = false)
     {
         var uploadAction = segments.Length == 0
             ? "/upload/"
@@ -74,22 +87,45 @@ public static class HtmlRenderer
               """
             : "";
 
+        var heading = isWo ? "Upload files" : "Upload files to this folder";
+
+        // Contextual notice shown above the form (for wo) or below the button (separate upload dir)
+        var topNotice = isWo
+            ? BuildInfoNotice("You have upload-only access. File browsing is not available for your account.")
+            : "";
+
+        var bottomNotice = !isWo && separateUploadDir
+            ? BuildInfoNotice("Uploaded files go to a private storage area and will not appear in this listing. Once uploaded, they cannot be managed from here.")
+            : "";
+
         return $"""
             <div class="upload-section">
-              <h2>Upload files to this folder</h2>
+              <h2>{heading}</h2>
+              {topNotice}
               <form id="upload-form" method="post" action="{uploadAction}" enctype="multipart/form-data">
                 <div class="drop-zone" id="drop-zone">
                   <div>Click or drag &amp; drop files here</div>
-                  <div class="hint">Multiple files supported</div>
+                  <div class="hint">Multiple files supported &middot; Ctrl+V to paste an image</div>
                   <input type="file" name="files" multiple id="file-input">
                 </div>
                 <div id="upload-queue" hidden></div>
                 <button type="submit" class="btn">Upload</button>
               </form>
+              {bottomNotice}
               {mkdirButton}
             </div>
             """;
     }
+
+    private static string BuildInfoNotice(string text) =>
+        $"""<div style="margin-top:0.75rem;padding:0.65rem 0.9rem;background:#1a2535;border-left:3px solid #5ba4f5;border-radius:4px;font-size:0.82rem;color:#aaa">{text}</div>""";
+
+    private static string BuildRoNotice() =>
+        """
+            <div class="upload-section">
+              <p style="font-size:0.85rem;color:#888;margin:0">Read-only access — uploads are disabled for your account.</p>
+            </div>
+        """;
 
     // ── Row builders ──────────────────────────────────────────────────────────
 
