@@ -1064,8 +1064,8 @@ public class RouteHandlers(
     }
 
     // GET /my-uploads/info/{**subpath}
-    // Returns JSON metadata for a file in the sender's own subfolder.
-    public IResult InfoMyUpload(HttpContext ctx, string? subpath)
+    // Returns JSON metadata (including SHA-256 hash) for a file in the sender's own subfolder.
+    public async Task<IResult> InfoMyUpload(HttpContext ctx, string? subpath)
     {
         if (!perSender)
             return Results.NotFound("My Uploads requires --per-sender mode.");
@@ -1094,12 +1094,21 @@ public class RouteHandlers(
         var info     = new FileInfo(resolved);
         var mimeType = MimeTypes.GetMimeType(resolved);
 
+        string sha256;
+        await using (var fs = new FileStream(resolved, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true))
+        {
+            var hashBytes = await System.Security.Cryptography.SHA256.HashDataAsync(fs);
+            sha256 = Convert.ToHexString(hashBytes).ToLowerInvariant();
+        }
+
         return Results.Json(new
         {
             name      = info.Name,
             sizeBytes = info.Length,
             size      = HtmlRenderer.FormatSizePublic(info.Length),
-            mimeType
+            modified  = info.LastWriteTimeUtc.ToString("yyyy-MM-dd HH:mm:ss") + " UTC",
+            mimeType,
+            sha256
         });
     }
 
@@ -1140,6 +1149,52 @@ public class RouteHandlers(
         return Results.Redirect(redirectUrl);
     }
 
+    // POST /my-uploads/rename/{**subpath}
+    // Renames a file in the sender's own subfolder; redirects to parent in /my-uploads.
+    public async Task<IResult> RenameMyUpload(HttpContext ctx, string? subpath)
+    {
+        if (!perSender)
+            return Results.NotFound("My Uploads requires --per-sender mode.");
+
+        if (GetRole(ctx) == "ro")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (string.IsNullOrEmpty(subpath))
+            return Results.BadRequest("No file specified.");
+
+        var senderKey  = ResolveSenderKey(ctx);
+        var senderRoot = Path.Combine(uploadDir, senderKey);
+
+        string resolved;
+        try
+        {
+            resolved = Path.GetFullPath(Path.Combine(senderRoot, subpath));
+            if (!resolved.StartsWith(uploadDir, StringComparison.OrdinalIgnoreCase))
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        if (!File.Exists(resolved))
+            return Results.NotFound("File not found.");
+
+        var form    = await ctx.Request.ReadFormAsync();
+        var newName = Path.GetFileName(form["newname"].ToString());
+        if (string.IsNullOrWhiteSpace(newName))
+            return Results.BadRequest("No new name provided.");
+
+        var newPath = Path.Combine(Path.GetDirectoryName(resolved)!, newName);
+        if (File.Exists(newPath))
+            return Results.Conflict("A file with that name already exists.");
+
+        File.Move(resolved, newPath);
+
+        var parentSubpath = Path.GetDirectoryName(subpath)?.Replace('\\', '/');
+        var redirectUrl   = string.IsNullOrEmpty(parentSubpath)
+            ? "/my-uploads"
+            : $"/my-uploads/browse/{parentSubpath}";
+        return Results.Redirect(redirectUrl);
+    }
+
     // POST /admin/uploads/delete/{**subpath}
     // Deletes a file from the upload directory; redirects to parent in /admin/uploads. Admin only.
     public IResult DeleteAdminUpload(HttpContext ctx, string? subpath)
@@ -1163,6 +1218,46 @@ public class RouteHandlers(
             return Results.NotFound("File not found.");
 
         File.Delete(resolved);
+
+        var parentSubpath = Path.GetDirectoryName(subpath)?.Replace('\\', '/');
+        var redirectUrl   = string.IsNullOrEmpty(parentSubpath)
+            ? "/admin/uploads"
+            : $"/admin/uploads/browse/{parentSubpath}";
+        return Results.Redirect(redirectUrl);
+    }
+
+    // POST /admin/uploads/rename/{**subpath}
+    // Renames a file in the upload directory; redirects to parent in /admin/uploads. Admin only.
+    public async Task<IResult> RenameAdminUpload(HttpContext ctx, string? subpath)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (string.IsNullOrEmpty(subpath))
+            return Results.BadRequest("No file specified.");
+
+        string resolved;
+        try
+        {
+            resolved = Path.GetFullPath(Path.Combine(uploadDir, subpath));
+            if (!resolved.StartsWith(uploadDir, StringComparison.OrdinalIgnoreCase))
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+        catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        if (!File.Exists(resolved))
+            return Results.NotFound("File not found.");
+
+        var form    = await ctx.Request.ReadFormAsync();
+        var newName = Path.GetFileName(form["newname"].ToString());
+        if (string.IsNullOrWhiteSpace(newName))
+            return Results.BadRequest("No new name provided.");
+
+        var newPath = Path.Combine(Path.GetDirectoryName(resolved)!, newName);
+        if (File.Exists(newPath))
+            return Results.Conflict("A file with that name already exists.");
+
+        File.Move(resolved, newPath);
 
         var parentSubpath = Path.GetDirectoryName(subpath)?.Replace('\\', '/');
         var redirectUrl   = string.IsNullOrEmpty(parentSubpath)

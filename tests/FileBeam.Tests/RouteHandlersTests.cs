@@ -754,31 +754,31 @@ public sealed class RouteHandlersTests : IDisposable
     // ── InfoMyUpload ──────────────────────────────────────────────────────────
 
     [Fact]
-    public void InfoMyUpload_NoPerSender_Returns404()
+    public async Task InfoMyUpload_NoPerSender_Returns404()
     {
         // _handlers constructed without perSender
-        var result = _handlers.InfoMyUpload(MakeContext(), "file.txt");
+        var result = await _handlers.InfoMyUpload(MakeContext(), "file.txt");
         Assert.Equal(404, StatusCode(result));
     }
 
     [Fact]
-    public void InfoMyUpload_RoRole_Returns403()
+    public async Task InfoMyUpload_RoRole_Returns403()
     {
         var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher, perSender: true);
         var ctx = MakeContext();
         ctx.Items["fb.role"] = "ro";
-        var result = handlers.InfoMyUpload(ctx, "file.txt");
+        var result = await handlers.InfoMyUpload(ctx, "file.txt");
         Assert.Equal(403, StatusCode(result));
     }
 
     [Fact]
-    public void InfoMyUpload_FileNotFound_Returns404()
+    public async Task InfoMyUpload_FileNotFound_Returns404()
     {
         var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher, perSender: true);
         var ctx = MakeContext();
         var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes("alice:pass"));
         ctx.Request.Headers.Authorization = $"Basic {encoded}";
-        var result = handlers.InfoMyUpload(ctx, "missing.txt");
+        var result = await handlers.InfoMyUpload(ctx, "missing.txt");
         Assert.Equal(404, StatusCode(result));
     }
 
@@ -794,10 +794,11 @@ public sealed class RouteHandlersTests : IDisposable
         Directory.CreateDirectory(senderDir);
         await File.WriteAllTextAsync(Path.Combine(senderDir, "note.txt"), "hello world");
 
-        var body = await ReadBodyAsync(handlers.InfoMyUpload(ctx, "note.txt"));
+        var body = await ReadBodyAsync(await handlers.InfoMyUpload(ctx, "note.txt"));
         Assert.Contains("note.txt", body);
         Assert.Contains("sizeBytes", body);
         Assert.Contains("mimeType", body);
+        Assert.Contains("sha256", body);
     }
 
     // ── DeleteMyUpload ────────────────────────────────────────────────────────

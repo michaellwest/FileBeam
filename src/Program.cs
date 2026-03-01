@@ -672,12 +672,14 @@ app.MapGet("/my-uploads/download-zip/{**subpath}",    handlers.DownloadMyUploads
 app.MapGet("/my-uploads/info/{**subpath}",            handlers.InfoMyUpload);
 app.MapPost("/my-uploads/upload/{**subpath}",     handlers.UploadToMyUploads);
 app.MapPost("/my-uploads/delete/{**subpath}",     handlers.DeleteMyUpload);
+app.MapPost("/my-uploads/rename/{**subpath}",     handlers.RenameMyUpload);
 
 // ── Admin: full upload dir browse + share token list + revocation ──────────────
 app.MapGet("/admin/uploads",                            handlers.BrowseAdminUploads);
 app.MapGet("/admin/uploads/browse/{**subpath}",         handlers.BrowseAdminUploads);
 app.MapGet("/admin/uploads/download/{**subpath}",       handlers.DownloadAdminUpload);
 app.MapPost("/admin/uploads/delete/{**subpath}",        handlers.DeleteAdminUpload);
+app.MapPost("/admin/uploads/rename/{**subpath}",        handlers.RenameAdminUpload);
 // catch-all for direct subpath access (must be after the more-specific routes)
 app.MapGet("/admin/uploads/{**subpath}",                handlers.BrowseAdminUploads);
 app.MapGet("/admin/shares",                 handlers.ListShareTokens);
