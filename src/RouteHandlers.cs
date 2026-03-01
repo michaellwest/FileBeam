@@ -554,6 +554,26 @@ public class RouteHandlers(
         return Results.Redirect($"/browse/{relPath}");
     }
 
+    // GET /disk-space  — JSON with available/total bytes for the upload drive
+    public IResult DiskSpace()
+    {
+        try
+        {
+            var root  = Path.GetPathRoot(uploadDir) ?? uploadDir;
+            var drive = new DriveInfo(root);
+            return Results.Json(new
+            {
+                availableBytes = drive.AvailableFreeSpace,
+                totalBytes     = drive.TotalSize
+            });
+        }
+        catch
+        {
+            // Network or virtual drive — cannot determine disk space
+            return Results.NoContent();
+        }
+    }
+
     // GET /events  — Server-Sent Events stream for live reload
     public async Task FileEvents(HttpContext ctx)
     {

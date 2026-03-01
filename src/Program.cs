@@ -604,6 +604,7 @@ app.MapPost("/rename/{**subpath}",  handlers.RenameFile);
 app.MapPost("/share/{**subpath}",   handlers.CreateShareLink);
 app.MapGet("/s/{token}",            handlers.RedeemShareLink);
 app.MapPost("/mkdir/{**subpath}",   handlers.MkDir);
+app.MapGet("/disk-space",           handlers.DiskSpace);
 app.MapGet("/events",               handlers.FileEvents);
 
 try   { await app.RunAsync(); }
