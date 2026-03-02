@@ -99,7 +99,8 @@ public class RouteHandlers(
     Action<string, string>? debugLog = null,
     string configJson = "",
     string cliCommand = "",
-    string? auditLogPath = null)
+    string? auditLogPath = null,
+    TimeSpan? uploadTtl = null)
 {
     // Tracks cumulative bytes uploaded per sender key (IP or username).
     // Best-effort only — not atomic across concurrent uploads from the same sender.
@@ -365,7 +366,7 @@ public class RouteHandlers(
         var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, showHome: true, isReadOnly: isReadOnly, hasInvites: inviteStore is not null);
         // Pass separateUploadDir:false so the upload form is rendered (files DO land in uploadDir here)
         var html = HtmlRenderer.RenderDirectory(relPath, dirs.ToList(), files.ToList(), isReadOnly, csrfToken, sort, order, role,
-            separateUploadDir: false, urlBase: "upload-area", navLinks: navLinks, perSender: perSender);
+            separateUploadDir: false, urlBase: "upload-area", navLinks: navLinks, perSender: perSender, uploadTtl: uploadTtl);
         return Results.Content(html, "text/html");
     }
 
@@ -1474,7 +1475,8 @@ public class RouteHandlers(
             isReadOnly, csrfToken, sort, order, role,
             separateUploadDir: false,  // files uploaded here DO appear in this view
             urlBase: "my-uploads",
-            navLinks: navLinks);
+            navLinks: navLinks,
+            uploadTtl: uploadTtl);
         return Results.Content(html, "text/html");
     }
 
@@ -1987,7 +1989,8 @@ public class RouteHandlers(
             csrfToken, sort, order, role: "admin",
             separateUploadDir: false,
             urlBase: "admin/uploads",
-            navLinks: navLinks);
+            navLinks: navLinks,
+            uploadTtl: uploadTtl);
         return Results.Content(html, "text/html");
     }
 

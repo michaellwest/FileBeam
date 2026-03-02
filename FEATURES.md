@@ -38,8 +38,17 @@ POST a JSON payload to a configurable URL whenever a file is successfully upload
 ### FB-06 · File preview panel
 Inline preview for images (PNG, JPEG, GIF, WebP, SVG), plain text, Markdown (rendered), and PDF (via browser `<embed>`). Clicking a supported file opens a side panel or modal instead of triggering a download. The panel has a Download button. Unsupported types fall back to the current download behaviour.
 
-### FB-07 · Expiry auto-delete
-Automatically delete uploaded files after a configurable TTL. Set at the server level with `--upload-ttl <duration>` (e.g. `24h`, `7d`). A background task runs periodically and removes files older than the TTL from the upload directory. The directory listing shows an "expires in X" badge on files approaching deletion. Admin users are exempt from deletion by default (configurable).
+### FB-07 · Expiry auto-delete ✅
+Automatically delete uploaded files after a configurable TTL. Set at the server level with `--upload-ttl <duration>` (e.g. `24h`, `7d`, `30m`). A background task runs every 60 seconds and removes files from `uploadDir` whose `LastWriteTime` is older than the TTL. Empty directories are pruned bottom-up after each sweep. The directory listing shows a live "expires in X" countdown badge on upload views.
+
+**Admin exemption:** When `--per-sender` is active, the admin's named subfolder is skipped entirely. Without `--per-sender`, all files expire equally (no per-file metadata is stored).
+
+**Implementation:**
+- `src/UploadExpirer.cs` — `IAsyncDisposable` background worker (mirrors `AuditLogger` pattern)
+- `--upload-ttl` CLI flag + `uploadTtl` config field in `filebeam.json`
+- Expiry column injected into upload-context directory views (`/upload-area`, `/my-uploads`, `/admin/uploads`) only; main browse view unaffected
+- Client-side countdown JS reuses `_fmtExpiry()` pattern from invite expiry
+- 16 new tests (10 UploadExpirerTests + 6 HtmlRendererExpiryTests)
 
 ### FB-08 · Audit log viewer
 A read-only admin page at `GET /admin/audit` that renders the last N lines of the NDJSON audit log in a table (timestamp, action, user, file, bytes, IP, request ID). Auto-refreshes every 30 seconds. Only available when `--audit-log` is configured. No new log format changes — parses the existing NDJSON.

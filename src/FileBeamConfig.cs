@@ -30,6 +30,7 @@ internal sealed class FileBeamConfig
     [JsonPropertyName("auditLogMaxSize")] public string? AuditLogMaxSize { get; init; }
     [JsonPropertyName("rateLimit")]       public int?    RateLimit       { get; init; }
     [JsonPropertyName("logLevel")]        public string? LogLevel        { get; init; }
+    [JsonPropertyName("uploadTtl")]       public string? UploadTtl       { get; init; }
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -83,7 +84,8 @@ internal sealed class FileBeamConfig
         string? auditLog,
         long    auditLogMaxSize,
         int     rateLimit,
-        string  logLevel)
+        string  logLevel,
+        string? uploadTtl = null)
     {
         var sb = new StringBuilder("filebeam.exe");
         sb.Append($" --download \"{download}\"");
@@ -122,6 +124,8 @@ internal sealed class FileBeamConfig
             sb.Append($" --rate-limit {rateLimit}");
         if (logLevel != "info")
             sb.Append($" --log-level {logLevel}");
+        if (uploadTtl != null)
+            sb.Append($" --upload-ttl \"{uploadTtl}\"");
         return sb.ToString();
     }
 
@@ -147,7 +151,8 @@ internal sealed class FileBeamConfig
         string? auditLog,
         long    auditLogMaxSize,
         int     rateLimit,
-        string  logLevel)
+        string  logLevel,
+        string? uploadTtl = null)
     {
         var obj = new
         {
@@ -172,6 +177,7 @@ internal sealed class FileBeamConfig
             auditLogMaxSize = auditLogMaxSize > 0 ? FormatBytes(auditLogMaxSize) : "unlimited",
             rateLimit,
             logLevel,
+            uploadTtl,
         };
         return JsonSerializer.Serialize(obj, new JsonSerializerOptions { WriteIndented = true });
     }

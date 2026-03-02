@@ -27,7 +27,8 @@ public static class HtmlRenderer
         string urlBase = "",
         string navLinks = "",
         bool perSender = false,
-        string adminConfigModal = "")
+        string adminConfigModal = "",
+        TimeSpan? uploadTtl = null)
     {
         var segments = relPath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
 
@@ -56,17 +57,19 @@ public static class HtmlRenderer
 
         var bodyClass = isWo ? "role-wo" : "";
 
+        var showExpiry = uploadTtl.HasValue;
         return ResourceLoader.Template
             .Replace("{{PAGE_TITLE}}",      HttpUtility.HtmlEncode(relPath))
             .Replace("{{BODY_CLASS}}",      bodyClass)
             .Replace("{{NAV_LINKS}}",       navLinks)
             .Replace("{{BREADCRUMB}}",      BuildBreadcrumb(segments, urlBase))
-            .Replace("{{THEAD}}",           BuildTHead(sort, order, urlBase))
-            .Replace("{{ROWS}}",            BuildRows(segments, dirs, files, isAdmin, urlBase))
+            .Replace("{{THEAD}}",           BuildTHead(sort, order, urlBase, showExpiry))
+            .Replace("{{ROWS}}",            BuildRows(segments, dirs, files, isAdmin, urlBase, uploadTtl))
             .Replace("{{UPLOAD_SECTION}}", uploadSection)
             .Replace("{{CSRF_TOKEN}}",      HttpUtility.HtmlAttributeEncode(csrfToken))
             .Replace("{{ADMIN_CONFIG_MODAL}}", adminConfigModal)
-            .Replace("{{APP_JS}}",          ResourceLoader.AppJs);
+            .Replace("{{APP_JS}}",          ResourceLoader.AppJs)
+            .Replace("{{EXPIRY_JS}}",       showExpiry ? BuildExpiryJs() : "");
     }
 
     /// <summary>
@@ -118,7 +121,7 @@ public static class HtmlRenderer
         return sb.ToString();
     }
 
-    private static string BuildTHead(string sort, string order, string urlBase = "")
+    private static string BuildTHead(string sort, string order, string urlBase = "", bool showExpiry = false)
     {
         string SortLink(string col, string label)
         {
@@ -127,11 +130,13 @@ public static class HtmlRenderer
             var indicator = isCurrent ? (order == "asc" ? " ▲" : " ▼") : "";
             return $"""<a href="?sort={col}&amp;order={nextOrder}" style="color:inherit;text-decoration:none">{label}{indicator}</a>""";
         }
+        var expiryTh = showExpiry ? "<th>Expires</th>" : "";
         return $"""
         <tr>
           <th>{SortLink("name", "Name")}</th>
           <th>{SortLink("size", "Size")}</th>
           <th>{SortLink("date", "Modified")}</th>
+          {expiryTh}
           <th></th>
         </tr>
         """;
@@ -216,7 +221,8 @@ public static class HtmlRenderer
         List<DirectoryInfo> dirs,
         List<FileInfo> files,
         bool isAdmin = false,
-        string urlBase = "")
+        string urlBase = "",
+        TimeSpan? uploadTtl = null)
     {
         // Determine URL prefixes based on the view root
         var browsePrefix   = string.IsNullOrEmpty(urlBase) ? "/browse/"       : $"/{urlBase}/browse/";
@@ -227,6 +233,8 @@ public static class HtmlRenderer
         var isMyUploads    = urlBase == "my-uploads";
         var isAdminUploads = urlBase == "admin/uploads";
         var isUploadArea   = urlBase == "upload-area";
+        var showExpiry     = uploadTtl.HasValue;
+        var colSpan        = showExpiry ? "5" : "4";
 
         var sb = new StringBuilder();
 
@@ -238,7 +246,7 @@ public static class HtmlRenderer
                 : browsePrefix + string.Join("/", segments[..^1].Select(Uri.EscapeDataString));
             sb.AppendLine($"""
                     <tr>
-                      <td colspan="4"><a href="{parentPath}" class="name"><span class="icon">📁</span> ..</a></td>
+                      <td colspan="{colSpan}"><a href="{parentPath}" class="name"><span class="icon">📁</span> ..</a></td>
                     </tr>
                 """);
         }
@@ -266,11 +274,13 @@ public static class HtmlRenderer
                           """
                         : "";
             var zipBtn = isMyUploads ? "" : $"""<a href="{zipUrl}" class="act-btn" title="Download as ZIP">⬇️</a>""";
+            var dirExpiryTd = showExpiry ? "<td></td>" : "";
             sb.AppendLine($"""
                     <tr>
                       <td><a href="{href}" class="name"><span class="icon">📁</span>{name}/</a></td>
                       <td class="size">—</td>
                       <td class="modified">{modif}</td>
+                      {dirExpiryTd}
                       <td class="actions">{zipBtn}{dirActionBtns}</td>
                     </tr>
                 """);
@@ -343,11 +353,24 @@ public static class HtmlRenderer
                 }
             }
 
+            // Expiry column for files (when uploadTtl is set)
+            string fileExpiryTd = "";
+            if (uploadTtl.HasValue)
+            {
+                var expiresAt  = file.LastWriteTimeUtc + uploadTtl.Value;
+                var isoExpiry  = HttpUtility.HtmlAttributeEncode(expiresAt.ToString("yyyy-MM-ddTHH:mm:ssZ"));
+                var diffSec    = (expiresAt - DateTime.UtcNow).TotalSeconds;
+                var expiryText = FormatExpiryText(diffSec);
+                var expiryColor = diffSec <= 0 ? "#e53e3e" : "#888";
+                fileExpiryTd = $"<td class=\"expires\" style=\"color:{expiryColor};font-size:.82rem\" data-expires=\"{isoExpiry}\">{HttpUtility.HtmlEncode(expiryText)}</td>";
+            }
+
             sb.AppendLine($"""
                     <tr>
                       <td>{nameCell}</td>
                       <td class="size">{size}</td>
                       <td class="modified">{modif}</td>
+                      {fileExpiryTd}
                       <td class="actions">
                         {actionsCell}
                       </td>
@@ -356,10 +379,67 @@ public static class HtmlRenderer
         }
 
         if (dirs.Count == 0 && files.Count == 0)
-            sb.AppendLine("""    <tr><td colspan="4" class="empty">This folder is empty.</td></tr>""");
+            sb.AppendLine($"""    <tr><td colspan="{colSpan}" class="empty">This folder is empty.</td></tr>""");
 
         return sb.ToString();
     }
+
+    // ── Expiry helpers ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns a human-readable expiry string like "expires in 6h 30m" or "expired 5m ago".
+    /// </summary>
+    internal static string FormatExpiryText(double diffSec)
+    {
+        if (diffSec <= 0)
+        {
+            var ago = -diffSec;
+            if (ago < 60)    return $"expired {(int)ago}s ago";
+            if (ago < 3600)  return $"expired {(int)(ago / 60)}m ago";
+            if (ago < 86400) return $"expired {(int)(ago / 3600)}h {(int)(ago % 3600 / 60)}m ago";
+            return $"expired {(int)(ago / 86400)}d ago";
+        }
+        if (diffSec < 60)    return $"expires in {(int)diffSec}s";
+        if (diffSec < 3600)  return $"expires in {(int)(diffSec / 60)}m";
+        if (diffSec < 86400) return $"expires in {(int)(diffSec / 3600)}h {(int)(diffSec % 3600 / 60)}m";
+        return $"expires in {(int)(diffSec / 86400)}d {(int)(diffSec % 86400 / 3600)}h";
+    }
+
+    /// <summary>
+    /// Builds the inline script block for file expiry countdown updates.
+    /// Selects all td[data-expires] cells and refreshes every 10 seconds.
+    /// </summary>
+    private static string BuildExpiryJs() => """
+        <script>
+        (function(){
+        function _fmtExpiry(isoStr){
+          var diffSec=Math.round((new Date(isoStr)-Date.now())/1000);
+          if(diffSec<=0){var ago=-diffSec;
+            if(ago<60)   return{text:'expired '+ago+'s ago',expired:true};
+            if(ago<3600) return{text:'expired '+Math.floor(ago/60)+'m ago',expired:true};
+            if(ago<86400)return{text:'expired '+Math.floor(ago/3600)+'h '+Math.floor((ago%3600)/60)+'m ago',expired:true};
+            return{text:'expired '+Math.floor(ago/86400)+'d ago',expired:true};
+          }
+          if(diffSec<60)   return{text:'expires in '+diffSec+'s',expired:false};
+          if(diffSec<3600) return{text:'expires in '+Math.floor(diffSec/60)+'m',expired:false};
+          if(diffSec<86400)return{text:'expires in '+Math.floor(diffSec/3600)+'h '+Math.floor((diffSec%3600)/60)+'m',expired:false};
+          return{text:'expires in '+Math.floor(diffSec/86400)+'d '+Math.floor((diffSec%86400)/3600)+'h',expired:false};
+        }
+        function initFileExpiryCountdowns(){
+          var cells=Array.from(document.querySelectorAll('td[data-expires]'));
+          if(!cells.length)return;
+          function refresh(){cells.forEach(function(td){
+            var r=_fmtExpiry(td.dataset.expires);
+            td.textContent=r.text;
+            td.style.color=r.expired?'#e53e3e':'#888';
+          });}
+          refresh();
+          setInterval(refresh,10000);
+        }
+        initFileExpiryCountdowns();
+        })();
+        </script>
+        """;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 

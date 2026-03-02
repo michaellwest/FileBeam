@@ -51,6 +51,7 @@ filebeam.exe --download "./share/download" --port 9000
 | `--tls-cert`           |        | _(none)_             | Path to TLS certificate PEM file (must be used with `--tls-key`)  |
 | `--tls-key`            |        | _(none)_             | Path to TLS private key PEM file (must be used with `--tls-cert`) |
 | `--log-level`          |        | `info`               | Console verbosity: `info` (default) or `debug`                    |
+| `--upload-ttl`         |        | _(none)_             | Auto-delete uploaded files after this duration (`30m`, `24h`, `7d`). When `--per-sender` is active the admin's named subfolder is exempt. |
 | `--config`             |        | _(none)_             | Path to a config file (see [Config file](#config-file))           |
 | `--print-config`       |        | _(off)_              | Print the fully resolved config as JSON and exit (no server start) |
 
@@ -84,7 +85,8 @@ FileBeam can load all its settings from a `filebeam.json` file so you don't have
   "auditLog":       "./audit.log",
   "auditLogMaxSize": "10MB",
   "rateLimit":      60,
-  "logLevel":       "info"
+  "logLevel":       "info",
+  "uploadTtl":      "24h"
 }
 ```
 
@@ -228,6 +230,25 @@ When `--audit-log` is configured with a file path (not `-`/stdout), an **Audit L
 **Columns:** Timestamp · Action · User · File · Bytes · IP · Status
 
 The page returns `404 Not Found` when `--audit-log` is absent or set to `-` (stdout mode). Malformed or unparseable log lines are silently skipped.
+
+#### Upload expiry auto-delete
+
+Use `--upload-ttl` to automatically delete uploaded files from `uploadDir` after a configurable time-to-live:
+
+```
+filebeam.exe --upload ./inbox --upload-ttl 24h
+```
+
+Accepted formats: `30m` (minutes), `24h` (hours), `7d` (days), or a plain number of seconds (`3600`). A background task scans every 60 seconds and removes files whose `LastWriteTime` is older than the TTL. Empty directories are pruned bottom-up after each sweep.
+
+**Admin exemption:** When `--per-sender` is active, the admin user's named subfolder is skipped so admin-uploaded files are never auto-deleted. Without `--per-sender`, all files expire equally.
+
+**UI:** Upload views (`/upload-area`, `/my-uploads`, `/admin/uploads`) show an **Expires** column with a live countdown badge (updated every 10 seconds). Files that have already passed their TTL are shown in red.
+
+The `uploadTtl` field is also supported in `filebeam.json`:
+```json
+{ "uploadTtl": "24h" }
+```
 
 #### Per-sender upload folders
 

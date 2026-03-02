@@ -32,6 +32,7 @@ long    auditLogMaxSize     = 0;
 int     shareTtl            = 3600; // default share link TTL in seconds
 int     rateLimit           = 60;  // requests per minute per IP
 string  logLevel            = "info"; // info | debug
+TimeSpan? uploadTtl         = null; // auto-delete TTL for uploaded files; null = disabled
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -102,6 +103,17 @@ for (int i = 0; i < args.Length; i++)
         cliConfigFile = args[++i];
     else if (args[i] == "--invites-file"    && i + 1 < args.Length)
         cliInvitesFile = args[++i];
+    else if (args[i] == "--upload-ttl" && i + 1 < args.Length)
+    {
+        var raw = args[++i];
+        if (!TryParseDuration(raw, out var parsedTtl))
+        {
+            AnsiConsole.MarkupLine($"[red]Error:[/] --upload-ttl invalid value '{Markup.Escape(raw)}'. " +
+                "Use e.g. 30m, 24h, 7d, or a number of seconds.");
+            return 1;
+        }
+        uploadTtl = parsedTtl;
+    }
     else if (args[i] == "--print-config")
         printConfig = true;
 }
@@ -149,6 +161,8 @@ for (int i = 0; i < args.Length; i++)
         if (rateLimit == 60     && cfg!.RateLimit       is not null) rateLimit   = cfg.RateLimit.Value;
         if (logLevel == "info"  && cfg!.LogLevel        is not null) logLevel    = cfg.LogLevel.ToLowerInvariant();
         auditLogPath ??= cfg!.AuditLog;
+        if (uploadTtl is null && cfg!.UploadTtl is not null
+            && TryParseDuration(cfg.UploadTtl, out var cfgUploadTtl)) uploadTtl = cfgUploadTtl;
 
         AnsiConsole.MarkupLine($"[grey]Config loaded: {Markup.Escape(configPath)}[/]");
     }
@@ -189,6 +203,50 @@ static bool TryParseSize(string raw, out long bytes)
         _          => -1
     };
     return bytes >= 0;
+}
+
+/// <summary>
+/// Parses a human-readable duration string (e.g. "30m", "24h", "7d", "3600").
+/// Plain integers are treated as seconds. Returns false on invalid input.
+/// </summary>
+static bool TryParseDuration(string raw, out TimeSpan result)
+{
+    result = default;
+    if (string.IsNullOrWhiteSpace(raw)) return false;
+
+    var s = raw.Trim();
+
+    // Plain integer → seconds
+    if (long.TryParse(s, out var secs) && secs > 0)
+    {
+        result = TimeSpan.FromSeconds(secs);
+        return true;
+    }
+
+    if (s.Length < 2) return false;
+    var suffix = s[^1];
+    if (!long.TryParse(s[..^1], out var num) || num <= 0) return false;
+
+    result = suffix switch
+    {
+        's' or 'S' => TimeSpan.FromSeconds(num),
+        'm' or 'M' => TimeSpan.FromMinutes(num),
+        'h' or 'H' => TimeSpan.FromHours(num),
+        'd' or 'D' => TimeSpan.FromDays(num),
+        _ => TimeSpan.Zero
+    };
+    return result > TimeSpan.Zero;
+}
+
+/// <summary>
+/// Formats a TimeSpan as a compact human-readable string (e.g. "30m", "24h", "7d").
+/// </summary>
+static string FormatDuration(TimeSpan ts)
+{
+    if (ts.TotalSeconds < 60)    return $"{(long)ts.TotalSeconds}s";
+    if (ts.TotalMinutes < 60)    return $"{(long)ts.TotalMinutes}m";
+    if (ts.TotalHours   < 24)    return $"{(long)ts.TotalHours}h";
+    return $"{(long)ts.TotalDays}d";
 }
 
 // ── Banner ─────────────────────────────────────────────────────────────────────
@@ -301,7 +359,8 @@ if (printConfig)
         auditLog:        auditLogPath,
         auditLogMaxSize: auditLogMaxSize,
         rateLimit:       rateLimit,
-        logLevel:        logLevel));
+        logLevel:        logLevel,
+        uploadTtl:       uploadTtl.HasValue ? FormatDuration(uploadTtl.Value) : null));
     return 0;
 }
 
@@ -419,6 +478,13 @@ AuditLogger? auditLogger = auditLogPath is not null
     ? new AuditLogger(auditLogPath == "-" ? null : auditLogPath, auditLogMaxSize)
     : null;
 
+// ── Upload expiry (optional) ──────────────────────────────────────────────────
+// --upload-ttl <duration>  → auto-delete files from uploadDir after TTL
+// (absent)                 → no auto-deletion
+UploadExpirer? uploadExpirer = uploadTtl.HasValue
+    ? new UploadExpirer(uploadDir, uploadTtl.Value, perSender, adminUsername)
+    : null;
+
 Action<string, string>? debugLog = logLevel == "debug"
     ? (reqId, msg) =>
       {
@@ -445,7 +511,8 @@ var configJson = FileBeamConfig.ToDisplayJson(
     auditLog:        auditLogPath,
     auditLogMaxSize: auditLogMaxSize,
     rateLimit:       rateLimit,
-    logLevel:        logLevel);
+    logLevel:        logLevel,
+    uploadTtl:       uploadTtl.HasValue ? FormatDuration(uploadTtl.Value) : null);
 
 var cliCommand = FileBeamConfig.ToCliCommand(
     download:        serveDir,
@@ -465,7 +532,8 @@ var cliCommand = FileBeamConfig.ToCliCommand(
     auditLog:        auditLogPath,
     auditLogMaxSize: auditLogMaxSize,
     rateLimit:       rateLimit,
-    logLevel:        logLevel);
+    logLevel:        logLevel,
+    uploadTtl:       uploadTtl.HasValue ? FormatDuration(uploadTtl.Value) : null);
 
 var handlers = new RouteHandlers(
     serveDir, uploadDir, fileWatcher,
@@ -483,7 +551,8 @@ var handlers = new RouteHandlers(
     debugLog:               debugLog,
     configJson:             configJson,
     cliCommand:             cliCommand,
-    auditLogPath:           auditLogPath);
+    auditLogPath:           auditLogPath,
+    uploadTtl:              uploadTtl);
 
 // ── Console request log (with elapsed time) ──────────────────────────────────
 // Must be registered before route mappings so it wraps endpoint execution.
@@ -787,6 +856,7 @@ app.MapGet("/join/{token}",                 handlers.JoinWithInvite);
 try   { await app.RunAsync(); }
 finally
 {
-    if (auditLogger is not null) await auditLogger.DisposeAsync();
+    if (auditLogger     is not null) await auditLogger.DisposeAsync();
+    if (uploadExpirer   is not null) await uploadExpirer.DisposeAsync();
 }
 return 0;
