@@ -651,8 +651,20 @@ if (authRequired)
         }
 
         bool authenticated = false;
+
+        // Cookie session check (invite-based auth) — checked before Basic Auth so
+        // browser users who joined via an invite link don't need to re-enter credentials.
+        var sessionCookie = ctx.Request.Cookies["fb.session"];
+        if (sessionCookie is not null &&
+            RouteHandlers.TryValidateSessionCookie(sessionCookie, sessionKey, inviteStore, out var cookieRole, out var cookieUser))
+        {
+            ctx.Items["fb.role"] = cookieRole;
+            ctx.Items["fb.user"] = cookieUser;
+            authenticated = true;
+        }
+
         var header = ctx.Request.Headers.Authorization.ToString();
-        if (header.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
+        if (!authenticated && header.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
         {
             try
             {
