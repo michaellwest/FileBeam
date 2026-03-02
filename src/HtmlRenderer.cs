@@ -741,6 +741,37 @@ async function revokeInvite(id) {
   const res = await fetch('/admin/invites/' + id, { method: 'DELETE', headers: { 'X-CSRF-Token': CSRF } });
   if (res.ok) location.reload(); else alert('Failed to revoke invite.');
 }
+
+// ── Expiry countdowns ──────────────────────────────────────────────────────
+function _fmtExpiry(isoStr) {
+  const diffSec = Math.round((new Date(isoStr) - Date.now()) / 1000);
+  if (diffSec <= 0) {
+    const ago = -diffSec;
+    if (ago < 60)    return { text: 'expired ' + ago + 's ago',                          expired: true };
+    if (ago < 3600)  return { text: 'expired ' + Math.floor(ago / 60) + 'm ago',         expired: true };
+    if (ago < 86400) return { text: 'expired ' + Math.floor(ago / 3600) + 'h ago',       expired: true };
+                     return { text: 'expired ' + Math.floor(ago / 86400) + 'd ago',      expired: true };
+  }
+  if (diffSec < 60)    return { text: 'expires in ' + diffSec + 's',                                                                        expired: false };
+  if (diffSec < 3600)  return { text: 'expires in ' + Math.floor(diffSec / 60) + 'm',                                                      expired: false };
+  if (diffSec < 86400) return { text: 'expires in ' + Math.floor(diffSec / 3600) + 'h ' + Math.floor((diffSec % 3600) / 60) + 'm',        expired: false };
+                       return { text: 'expires in ' + Math.floor(diffSec / 86400) + 'd ' + Math.floor((diffSec % 86400) / 3600) + 'h',    expired: false };
+}
+
+function initExpiryCountdowns() {
+  const cells = Array.from(document.querySelectorAll('td[data-expires]'));
+  if (!cells.length) return;
+  function refresh() {
+    cells.forEach(function(td) {
+      const r = _fmtExpiry(td.dataset.expires);
+      td.textContent = r.text;
+      td.style.color = r.expired ? '#e53e3e' : '#888';
+    });
+  }
+  refresh();
+  setInterval(refresh, 10000);
+}
+initExpiryCountdowns();
 </script>
 </body></html>
 """);
@@ -759,10 +790,19 @@ async function revokeInvite(id) {
             var idAttr   = HttpUtility.HtmlAttributeEncode(t.Id);
             var link     = $"{baseUrl}/join/{t.Id}";
             var linkJs   = HttpUtility.JavaScriptStringEncode(link);
-            var expiry   = t.ExpiresAt.HasValue
-                ? HttpUtility.HtmlEncode(t.ExpiresAt.Value.ToString("yyyy-MM-dd HH:mm") + " UTC")
-                : "<span style=\"color:#555\">Never</span>";
-            var isExpired  = t.ExpiresAt.HasValue && t.ExpiresAt.Value < DateTimeOffset.UtcNow;
+            var isExpired = t.ExpiresAt.HasValue && t.ExpiresAt.Value < DateTimeOffset.UtcNow;
+            string expiryTd;
+            if (t.ExpiresAt.HasValue)
+            {
+                var iso   = HttpUtility.HtmlAttributeEncode(t.ExpiresAt.Value.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ"));
+                var title = HttpUtility.HtmlAttributeEncode(t.ExpiresAt.Value.ToString("yyyy-MM-dd HH:mm") + " UTC");
+                var text  = HttpUtility.HtmlEncode(t.ExpiresAt.Value.ToString("yyyy-MM-dd HH:mm") + " UTC");
+                expiryTd = $"<td style=\"color:#888;font-size:.82rem\" data-expires=\"{iso}\" title=\"{title}\">{text}</td>";
+            }
+            else
+            {
+                expiryTd = "<td style=\"color:#555;font-size:.82rem\">Never</td>";
+            }
             var rowClass   = (!t.IsActive || isExpired) ? " class=\"status-inactive\"" : "";
             var roleClass  = $"role-badge role-{HttpUtility.HtmlAttributeEncode(t.Role)}";
             var copyBtn    = active
@@ -779,7 +819,7 @@ async function revokeInvite(id) {
     <tr{rowClass}>
       <td>{name}</td>
       <td><span class="{roleClass}">{HttpUtility.HtmlEncode(t.Role)}</span></td>
-      <td style="color:#888;font-size:.82rem">{expiry}</td>
+      {expiryTd}
       <td style="text-align:right;color:#888">{t.UseCount}</td>
       <td class="actions">{copyBtn}{bearerBtn}{revokeBtn}</td>
     </tr>

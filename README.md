@@ -177,6 +177,8 @@ Invoke-WebRequest http://host/download/report.pdf `
 
 The admin UI page shows active invites in a table with one-click copy buttons for the join link (🔗) and Bearer token (⌨), plus a revoke button. The **New Invite** modal shows both the browser join URL and the `Bearer <id>` string after creation. Inactive / expired invites appear in a collapsed section. An **Invites** nav link is added to all pages when `--invites-file` is configured.
 
+The **Expires** column shows a live relative countdown that updates every 10 seconds (e.g. `expires in 2h 30m`, `expires in 45s`). Expired invites that haven't been cleaned up display `expired Xm ago` in red. Hover the cell for the absolute UTC timestamp.
+
 **Create body** (`Content-Type: application/json`, `X-CSRF-Token: <token>`):
 ```json
 { "friendlyName": "Alice", "role": "rw", "expiresAt": "2026-12-31T23:59:59Z" }

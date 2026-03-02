@@ -397,6 +397,21 @@ public sealed class InvitesAdminPageTests
     }
 
     [Fact]
+    public void RenderInvitesAdmin_InviteWithExpiry_HasDataExpiresAttribute()
+    {
+        var store  = new InviteStore();
+        var expiry = new DateTimeOffset(2027, 6, 1, 12, 0, 0, TimeSpan.Zero);
+        store.Create("Dave", "ro", expiry, "admin");
+
+        var html = HtmlRenderer.RenderInvitesAdmin(store.GetAll(), "tok", "http://host");
+
+        // data-expires must be ISO 8601 UTC so client-side JS can parse it
+        Assert.Contains("data-expires=\"2027-06-01T12:00:00Z\"", html);
+        // absolute time preserved as tooltip
+        Assert.Contains("title=\"2027-06-01 12:00 UTC\"", html);
+    }
+
+    [Fact]
     public void RenderInvitesAdmin_InviteWithoutExpiry_ShowsNever()
     {
         var store = new InviteStore();
@@ -405,6 +420,7 @@ public sealed class InvitesAdminPageTests
         var html = HtmlRenderer.RenderInvitesAdmin(store.GetAll(), "tok", "http://host");
 
         Assert.Contains("Never", html);
+        Assert.DoesNotContain("data-expires=\"", html);
     }
 
     // ── RenderInvitesAdmin — inactive / expired ───────────────────────────────
@@ -434,6 +450,19 @@ public sealed class InvitesAdminPageTests
 
         Assert.Contains("Inactive", html);
         Assert.Contains("Grace", html);
+    }
+
+    [Fact]
+    public void RenderInvitesAdmin_ExpiredInvite_HasDataExpiresAttribute()
+    {
+        var store  = new InviteStore();
+        var expiry = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero); // past
+        store.Create("OldUser", "rw", expiry, "admin");
+
+        var html = HtmlRenderer.RenderInvitesAdmin(store.GetAll(), "tok", "http://host");
+
+        // Even expired invites carry data-expires so JS can show "expired Xd ago"
+        Assert.Contains("data-expires=\"2020-01-01T00:00:00Z\"", html);
     }
 
     [Fact]
