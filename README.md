@@ -50,6 +50,49 @@ filebeam.exe --download "./share/download" --port 9000
 | `--tls-cert`           |        | _(none)_             | Path to TLS certificate PEM file (must be used with `--tls-key`)  |
 | `--tls-key`            |        | _(none)_             | Path to TLS private key PEM file (must be used with `--tls-cert`) |
 | `--log-level`          |        | `info`               | Console verbosity: `info` (default) or `debug`                    |
+| `--config`             |        | _(none)_             | Path to a config file (see [Config file](#config-file))           |
+| `--print-config`       |        | _(off)_              | Print the fully resolved config as JSON and exit (no server start) |
+
+#### Config file
+
+FileBeam can load all its settings from a `filebeam.json` file so you don't have to retype flags every run.
+
+**Auto-discovery:** if `filebeam.json` exists in the same directory as the exe, it is loaded automatically with no flags required. Use `--config <path>` to point to a file elsewhere.
+
+**Precedence:** hardcoded defaults → config file → CLI flags. CLI flags always win, so you can override a saved setting without editing the file.
+
+**Passwords are intentionally omitted** from config files — pass `--password` on the CLI or use `--credentials-file` for per-user auth.
+
+```jsonc
+// filebeam.json
+{
+  "download":       "./files",
+  "upload":         "./uploads",
+  "port":           9090,
+  "credentialsFile": "./users.txt",
+  "readonly":       false,
+  "perSender":      false,
+  "maxFileSize":    "500MB",
+  "maxUploadBytes": "2GB",
+  "maxUploadTotal": "10GB",
+  "maxUploadSize":  "500MB",
+  "tlsCert":        "./cert.pem",
+  "tlsKey":         "./key.pem",
+  "shareTtl":       3600,
+  "auditLog":       "./audit.log",
+  "auditLogMaxSize": "10MB",
+  "rateLimit":      60,
+  "logLevel":       "info"
+}
+```
+
+All size fields accept the same human-readable format as the CLI (`500MB`, `2GB`, `unlimited`). JSON comments (`//`, `/* */`) and trailing commas are supported.
+
+**Debugging config:** run `filebeam.exe --print-config` to see the fully resolved settings as JSON (passwords excluded) and exit without starting the server. Useful for verifying that the config file was picked up correctly.
+
+```
+filebeam.exe --config ./myconfig.json --print-config
+```
 
 #### HTTPS / TLS
 
