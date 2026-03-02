@@ -63,7 +63,7 @@ public static class HtmlRenderer
     /// Pass <paramref name="showHome"/> = true when rendering an alternate view (my-uploads, admin/uploads)
     /// so users can navigate back to the main file listing.
     /// </summary>
-    public static string BuildNavLinks(string role, bool perSender, bool separateUploadDir, bool showHome = false, bool isReadOnly = false)
+    public static string BuildNavLinks(string role, bool perSender, bool separateUploadDir, bool showHome = false, bool isReadOnly = false, bool hasInvites = false)
     {
         const string sep  = """<span style="color:#444">·</span>""";
         const string style = "font-size:0.82rem;color:#aaa;white-space:nowrap";
@@ -88,6 +88,11 @@ public static class HtmlRenderer
         {
             if (sb.Length > 0) sb.Append(sep);
             sb.Append($"""<a href="/admin/uploads" style="{style}">All&nbsp;Uploads</a>""");
+        }
+        if (role == "admin" && hasInvites)
+        {
+            if (sb.Length > 0) sb.Append(sep);
+            sb.Append($"""<a href="/admin/invites" style="{style}">Invites</a>""");
         }
         return sb.ToString();
     }
@@ -366,6 +371,270 @@ public static class HtmlRenderer
             ? new[] { name }
             : segments.Append(name).ToArray();
         return string.Join("/", parts.Select(Uri.EscapeDataString));
+    }
+
+    // ── Admin Invites page ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Renders the full admin invites management page as a self-contained HTML document.
+    /// </summary>
+    public static string RenderInvitesAdmin(
+        IReadOnlyList<InviteToken> tokens,
+        string csrfToken,
+        string baseUrl,
+        string navLinks = "")
+    {
+        var now      = DateTimeOffset.UtcNow;
+        var active   = tokens.Where(t => t.IsActive && !(t.ExpiresAt.HasValue && t.ExpiresAt <= now)).ToList();
+        var inactive = tokens.Except(active).ToList();
+
+        var sb = new StringBuilder();
+
+        // ── Head + CSS ──────────────────────────────────────────────────────
+        sb.Append("<!DOCTYPE html><html lang=\"en\"><head>\n");
+        sb.Append("<meta charset=\"UTF-8\">\n");
+        sb.Append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n");
+        sb.Append($"<meta name=\"csrf-token\" content=\"{HttpUtility.HtmlAttributeEncode(csrfToken)}\">\n");
+        sb.Append("<title>FileBeam \u2014 Invites</title>\n");
+        sb.Append("""
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f1117;color:#e0e0e0;min-height:100vh;padding:2rem}
+a{color:#5ba4f5;text-decoration:none}a:hover{text-decoration:underline}
+header{display:flex;align-items:center;gap:1rem;margin-bottom:1.75rem}
+header h1{font-size:1.4rem;font-weight:700;color:#5ba4f5}
+.section{background:#1a1d27;border-radius:8px;padding:1.25rem 1.5rem;margin-bottom:1.5rem}
+.section-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem}
+.section-hdr h2{font-size:1rem;font-weight:600;color:#aaa;text-transform:uppercase;letter-spacing:.05em}
+table{width:100%;border-collapse:collapse;margin-top:.5rem}
+thead tr{background:#222536}
+th{text-align:left;padding:.65rem 1rem;font-size:.73rem;text-transform:uppercase;letter-spacing:.05em;color:#888;font-weight:600}
+td{padding:.6rem 1rem;font-size:.9rem;border-top:1px solid #252836}
+tr:hover td{background:#20233a}
+.actions{text-align:right;white-space:nowrap}
+.act-btn{background:none;border:none;cursor:pointer;font-size:.9rem;padding:.1rem .3rem;border-radius:3px;opacity:.4;transition:opacity .15s}
+tr:hover .act-btn{opacity:1}
+.act-btn:hover{background:#252836}
+.empty-msg{color:#555;padding:1.5rem 0;text-align:center;font-size:.9rem}
+.role-badge{display:inline-block;padding:.15rem .55rem;border-radius:4px;font-size:.78rem;font-weight:600;background:#252836;color:#aaa}
+.role-admin{background:#2a1a1a;color:#f87171}
+.role-rw{background:#1a2a1a;color:#4ade80}
+.role-ro{background:#1a1f2a;color:#60a5fa}
+.role-wo{background:#2a2a1a;color:#facc15}
+.status-inactive td,.status-expired td{opacity:.5}
+details summary{cursor:pointer;color:#888;font-size:.9rem;padding:.5rem 0;user-select:none}
+details summary:hover{color:#aaa}
+details[open] summary{margin-bottom:.5rem}
+.btn{display:inline-block;padding:.5rem 1.1rem;background:#5ba4f5;color:#fff;border:none;border-radius:5px;font-size:.88rem;cursor:pointer;font-weight:600}
+.btn:hover{background:#3d8fe0}.btn:disabled{opacity:.5;cursor:default}
+.btn-secondary{background:transparent;border:1px solid #444;color:#aaa}
+.btn-secondary:hover{background:#252836;border-color:#5ba4f5;color:#e0e0e0}
+.btn-sm{padding:.3rem .75rem;font-size:.8rem}
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100}
+.modal-box{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:101;background:#1a1d27;border-radius:10px;width:min(92vw,440px);overflow:hidden}
+.modal-hdr{display:flex;align-items:center;justify-content:space-between;padding:.9rem 1.25rem;background:#222536}
+.modal-hdr h3{font-size:1rem;font-weight:600}
+.close-btn{background:none;border:none;color:#aaa;font-size:1.1rem;cursor:pointer;padding:.1rem .4rem;border-radius:3px}
+.close-btn:hover{background:#333;color:#fff}
+.modal-body{padding:1.25rem}
+.modal-ftr{display:flex;gap:.5rem;padding:.9rem 1.25rem;background:#141620;justify-content:flex-end}
+.form-lbl{display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:#888;margin-bottom:.85rem}
+.form-inp{background:#0f1117;border:1px solid #333;border-radius:5px;color:#e0e0e0;font-size:.9rem;padding:.45rem .75rem}
+.form-inp:focus{outline:none;border-color:#5ba4f5}
+.link-row{display:flex;gap:.5rem;margin-top:.4rem}
+.link-row .form-inp{flex:1}
+nav a{font-size:.82rem;color:#aaa;white-space:nowrap}
+</style>
+</head>
+""");
+
+        // ── Body + header ───────────────────────────────────────────────────
+        sb.Append("<body>\n");
+        sb.Append("<header>\n");
+        sb.Append("  <h1>\u26a1 FileBeam</h1>\n");
+        sb.Append($"  <nav style=\"display:flex;align-items:center;gap:.75rem;margin-left:1rem\">{navLinks}</nav>\n");
+        sb.Append("</header>\n");
+
+        // ── Active invites ──────────────────────────────────────────────────
+        sb.Append("<div class=\"section\">\n");
+        sb.Append($"<div class=\"section-hdr\"><h2>Active Invites ({active.Count})</h2>");
+        sb.Append("<button class=\"btn btn-sm\" onclick=\"openModal()\">+ New Invite</button></div>\n");
+        if (active.Count == 0)
+            sb.Append("<p class=\"empty-msg\">No active invites. Create one to get started.</p>\n");
+        else
+            sb.Append(BuildInviteRows(active, baseUrl, active: true));
+        sb.Append("</div>\n");
+
+        // ── Inactive / expired invites ──────────────────────────────────────
+        if (inactive.Count > 0)
+        {
+            sb.Append($"<details><summary>Inactive / Expired ({inactive.Count})</summary>\n");
+            sb.Append(BuildInviteRows(inactive, baseUrl, active: false));
+            sb.Append("</details>\n");
+        }
+
+        // ── New Invite modal ────────────────────────────────────────────────
+        sb.Append("""
+<div id="modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal-backdrop" onclick="closeModal()"></div>
+  <div class="modal-box">
+    <div class="modal-hdr">
+      <h3>New Invite</h3>
+      <button class="close-btn" onclick="closeModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <label class="form-lbl">Friendly Name
+        <input id="inp-name" class="form-inp" placeholder="e.g. Alice" maxlength="80" autocomplete="off">
+      </label>
+      <label class="form-lbl">Role
+        <select id="sel-role" class="form-inp">
+          <option value="rw" selected>rw &#x2014; read / write</option>
+          <option value="ro">ro &#x2014; read-only</option>
+          <option value="wo">wo &#x2014; upload-only</option>
+          <option value="admin">admin &#x2014; administrator</option>
+        </select>
+      </label>
+      <label class="form-lbl">Expires
+        <select id="sel-expiry" class="form-inp">
+          <option value="">Never</option>
+          <option value="3600">1 hour</option>
+          <option value="86400" selected>24 hours</option>
+          <option value="604800">7 days</option>
+          <option value="2592000">30 days</option>
+        </select>
+      </label>
+      <div id="create-err" style="color:#f66;font-size:.82rem;min-height:1.2em"></div>
+      <div id="link-result" hidden style="margin-top:.75rem">
+        <div style="font-size:.82rem;color:#888;margin-bottom:.35rem">Share this link with the recipient:</div>
+        <div class="link-row">
+          <input id="link-url" class="form-inp" readonly>
+          <button class="btn btn-sm" id="copy-btn" onclick="copyGeneratedLink()">Copy</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+      <button class="btn" id="btn-create" onclick="createInvite()">Create</button>
+    </div>
+  </div>
+</div>
+""");
+
+        // ── Inline JavaScript (no C# interpolation — contains JS {} freely) ─
+        sb.Append("""
+<script>
+const CSRF = document.querySelector('meta[name=csrf-token]').content;
+let _reloadOnClose = false;
+
+function openModal() {
+  _reloadOnClose = false;
+  document.getElementById('modal').hidden = false;
+  document.getElementById('link-result').hidden = true;
+  document.getElementById('create-err').textContent = '';
+  document.getElementById('inp-name').value = '';
+  const btn = document.getElementById('btn-create');
+  btn.disabled = false; btn.textContent = 'Create';
+  document.getElementById('inp-name').focus();
+}
+
+function closeModal() {
+  document.getElementById('modal').hidden = true;
+  if (_reloadOnClose) location.reload();
+}
+
+async function createInvite() {
+  const name   = document.getElementById('inp-name').value.trim();
+  const role   = document.getElementById('sel-role').value;
+  const expiry = document.getElementById('sel-expiry').value;
+  document.getElementById('create-err').textContent = '';
+  if (!name) { document.getElementById('create-err').textContent = 'Name is required.'; return; }
+  const body = { friendlyName: name, role };
+  if (expiry) body.expiresAt = new Date(Date.now() + parseInt(expiry) * 1000).toISOString();
+  const btn = document.getElementById('btn-create');
+  btn.disabled = true; btn.textContent = 'Creating\u2026';
+  try {
+    const res = await fetch('/admin/invites', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF, 'Accept': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const token = await res.json();
+    document.getElementById('link-url').value = location.origin + '/join/' + token.id;
+    document.getElementById('link-result').hidden = false;
+    btn.textContent = 'Created \u2713';
+    _reloadOnClose = true;
+  } catch (e) {
+    document.getElementById('create-err').textContent = 'Error: ' + e.message;
+    btn.disabled = false; btn.textContent = 'Create';
+  }
+}
+
+function copyGeneratedLink() {
+  const url = document.getElementById('link-url').value;
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = document.getElementById('copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 1600);
+  });
+}
+
+function copyInviteLink(id, url) {
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = document.getElementById('cp-' + id);
+    if (btn) { const orig = btn.textContent; btn.textContent = '\u2713'; setTimeout(() => btn.textContent = orig, 1600); }
+  });
+}
+
+async function revokeInvite(id) {
+  if (!confirm('Revoke this invite? All sessions issued with it will be invalidated immediately.')) return;
+  const res = await fetch('/admin/invites/' + id, { method: 'DELETE', headers: { 'X-CSRF-Token': CSRF } });
+  if (res.ok) location.reload(); else alert('Failed to revoke invite.');
+}
+</script>
+</body></html>
+""");
+
+        return sb.ToString();
+    }
+
+    private static string BuildInviteRows(IReadOnlyList<InviteToken> tokens, string baseUrl, bool active)
+    {
+        var sb = new StringBuilder();
+        sb.Append("<table>\n<thead><tr><th>Name</th><th>Role</th><th>Expires</th><th>Uses</th><th></th></tr></thead>\n<tbody>\n");
+
+        foreach (var t in tokens)
+        {
+            var name     = HttpUtility.HtmlEncode(t.FriendlyName);
+            var idAttr   = HttpUtility.HtmlAttributeEncode(t.Id);
+            var link     = $"{baseUrl}/join/{t.Id}";
+            var linkJs   = HttpUtility.JavaScriptStringEncode(link);
+            var expiry   = t.ExpiresAt.HasValue
+                ? HttpUtility.HtmlEncode(t.ExpiresAt.Value.ToString("yyyy-MM-dd HH:mm") + " UTC")
+                : "<span style=\"color:#555\">Never</span>";
+            var isExpired  = t.ExpiresAt.HasValue && t.ExpiresAt.Value < DateTimeOffset.UtcNow;
+            var rowClass   = (!t.IsActive || isExpired) ? " class=\"status-inactive\"" : "";
+            var roleClass  = $"role-badge role-{HttpUtility.HtmlAttributeEncode(t.Role)}";
+            var copyBtn    = active
+                ? $"<button class=\"act-btn\" id=\"cp-{idAttr}\" title=\"Copy invite link\" onclick=\"copyInviteLink('{idAttr}','{linkJs}')\">🔗</button>"
+                : "";
+            var revokeBtn  = t.IsActive
+                ? $"<button class=\"act-btn\" title=\"Revoke invite\" onclick=\"revokeInvite('{idAttr}')\">🚫</button>"
+                : "<span style=\"font-size:.78rem;color:#555\">revoked</span>";
+
+            sb.AppendLine($"""
+    <tr{rowClass}>
+      <td>{name}</td>
+      <td><span class="{roleClass}">{HttpUtility.HtmlEncode(t.Role)}</span></td>
+      <td style="color:#888;font-size:.82rem">{expiry}</td>
+      <td style="text-align:right;color:#888">{t.UseCount}</td>
+      <td class="actions">{copyBtn}{revokeBtn}</td>
+    </tr>
+""");
+        }
+
+        sb.Append("</tbody></table>\n");
+        return sb.ToString();
     }
 
     internal static string FormatSizePublic(long bytes) => FormatSize(bytes);

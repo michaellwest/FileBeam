@@ -286,7 +286,7 @@ public class RouteHandlers(
         };
 
         bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
-        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, isReadOnly: isReadOnly);
+        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, isReadOnly: isReadOnly, hasInvites: inviteStore is not null);
         var html = HtmlRenderer.RenderDirectory(relPath, dirs.ToList(), files.ToList(), isReadOnly, csrfToken, sort, order, role,
             separateUploadDir: separateDir, navLinks: navLinks, perSender: perSender);
         return Results.Content(html, "text/html");
@@ -350,7 +350,7 @@ public class RouteHandlers(
             _      => desc ? files.OrderByDescending(f => f.Name)          : files.OrderBy(f => f.Name)
         };
 
-        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, showHome: true, isReadOnly: isReadOnly);
+        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, showHome: true, isReadOnly: isReadOnly, hasInvites: inviteStore is not null);
         // Pass separateUploadDir:false so the upload form is rendered (files DO land in uploadDir here)
         var html = HtmlRenderer.RenderDirectory(relPath, dirs.ToList(), files.ToList(), isReadOnly, csrfToken, sort, order, role,
             separateUploadDir: false, urlBase: "upload-area", navLinks: navLinks, perSender: perSender);
@@ -1031,16 +1031,37 @@ public class RouteHandlers(
         return Results.Json(TokenToDto(token), statusCode: StatusCodes.Status201Created);
     }
 
-    // GET /admin/invites  — list all invite tokens (admin only)
+    // GET /admin/invites  — admin invite management page (HTML) or JSON list for API callers
+    // Content negotiation: browsers receive a full HTML page; requests with Accept: application/json
+    // receive the raw token array (used by the admin page's own JavaScript for mutations).
     public IResult ListInvites(HttpContext ctx)
     {
         if (GetRole(ctx) != "admin")
             return Results.StatusCode(StatusCodes.Status403Forbidden);
 
-        if (inviteStore is null)
-            return Results.StatusCode(StatusCodes.Status501NotImplemented);
+        // JSON branch — explicit API request
+        var accept = ctx.Request.Headers.Accept.ToString();
+        if (accept.Contains("application/json", StringComparison.OrdinalIgnoreCase))
+        {
+            if (inviteStore is null) return Results.StatusCode(StatusCodes.Status501NotImplemented);
+            return Results.Json(inviteStore.GetAll().Select(TokenToDto).ToList());
+        }
 
-        return Results.Json(inviteStore.GetAll().Select(TokenToDto).ToList());
+        // HTML branch — browser navigation
+        if (inviteStore is null)
+        {
+            var msg = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Invites disabled</title></head>" +
+                      "<body style=\"font-family:sans-serif;padding:2rem;background:#0f1117;color:#aaa\">" +
+                      "<h2>Invites not enabled</h2><p>Start FileBeam with <code>--invites-file</code> to use invite tokens.</p>" +
+                      "<p><a href=\"/\" style=\"color:#5ba4f5\">Home</a></p></body></html>";
+            return Results.Content(msg, "text/html");
+        }
+
+        var baseUrl      = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
+        bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
+        var navLinks     = HtmlRenderer.BuildNavLinks("admin", perSender, separateDir, showHome: true, hasInvites: true);
+        var html         = HtmlRenderer.RenderInvitesAdmin(inviteStore.GetAll(), csrfToken, baseUrl, navLinks);
+        return Results.Content(html, "text/html");
     }
 
     // DELETE /admin/invites/{id}  — revoke an invite token (admin only)
@@ -1336,7 +1357,7 @@ public class RouteHandlers(
         };
 
         bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
-        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, showHome: true);
+        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, showHome: true, hasInvites: inviteStore is not null);
         var html = HtmlRenderer.RenderDirectory(
             relPath, dirs.ToList(), files.ToList(),
             isReadOnly, csrfToken, sort, order, role,
@@ -1848,7 +1869,7 @@ public class RouteHandlers(
         };
 
         bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
-        var navLinks = HtmlRenderer.BuildNavLinks("admin", perSender, separateDir, showHome: true);
+        var navLinks = HtmlRenderer.BuildNavLinks("admin", perSender, separateDir, showHome: true, hasInvites: inviteStore is not null);
         var html = HtmlRenderer.RenderDirectory(
             relPath, dirs.ToList(), files.ToList(),
             isReadOnly: true,
