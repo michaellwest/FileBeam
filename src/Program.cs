@@ -19,6 +19,7 @@ int?    cliPort             = null;
 bool?   cliReadOnly         = null;
 bool?   cliPerSender        = null;
 string? cliConfigFile       = null;
+string? cliInvitesFile      = null;
 bool    printConfig         = false;
 long    maxFileSize         = 0;   // bytes; 0 = unlimited
 long    maxUploadBytes      = 0;   // per-sender cumulative bytes; 0 = unlimited
@@ -99,6 +100,8 @@ for (int i = 0; i < args.Length; i++)
         logLevel = args[++i].ToLowerInvariant();
     else if (args[i] == "--config"          && i + 1 < args.Length)
         cliConfigFile = args[++i];
+    else if (args[i] == "--invites-file"    && i + 1 < args.Length)
+        cliInvitesFile = args[++i];
     else if (args[i] == "--print-config")
         printConfig = true;
 }
@@ -126,6 +129,7 @@ for (int i = 0; i < args.Length; i++)
         cliUploadDir      ??= cfg!.Upload      is not null ? Path.GetFullPath(cfg.Upload)   : null;
         cliPort           ??= cfg!.Port;
         cliCredentialsFile ??= cfg!.CredentialsFile;
+        cliInvitesFile    ??= cfg!.InvitesFile;
         cliReadOnly       ??= cfg!.ReadOnly;
         cliPerSender      ??= cfg!.PerSender;
         cliTlsCert        ??= cfg!.TlsCert;
@@ -278,6 +282,12 @@ if (!string.IsNullOrEmpty(cliCredentialsFile))
     };
 }
 
+// ── Invite store (optional) ────────────────────────────────────────────────────
+InviteStore inviteStore = new(cliInvitesFile is not null ? Path.GetFullPath(cliInvitesFile) : null);
+
+// ── Per-session HMAC key for signing invite cookies ───────────────────────────
+var sessionKey = RandomNumberGenerator.GetBytes(32);
+
 // ── Validate TLS cert/key (optional) ──────────────────────────────────────────
 X509Certificate2? tlsCertificate = null;
 if (cliTlsCert != null || cliTlsKey != null)
@@ -322,7 +332,7 @@ if (printConfig)
         upload:         uploadDir,
         port:           port,
         credentialsFile: cliCredentialsFile,
-        invitesFile:    null,
+        invitesFile:    cliInvitesFile,
         readOnly:       readOnly,
         perSender:      perSender,
         maxFileSize:    maxFileSize,
@@ -372,6 +382,9 @@ var panel = new Panel(
         (!string.IsNullOrEmpty(password)
             ? "[bold]Auth:[/]     Shared password required" +
               (tlsCertificate is null ? " [yellow](HTTP — credentials unencrypted)[/]" : "") + "\n"
+            : "") +
+        (cliInvitesFile is not null
+            ? $"[bold]Invites:[/]  {inviteStore.GetAll().Count} token{(inviteStore.GetAll().Count == 1 ? "" : "s")} loaded from {Markup.Escape(Path.GetFileName(cliInvitesFile))}\n"
             : "") +
         string.Join("\n", ips.Select(ip => $"[bold]URL:[/]      [link]{(tlsCertificate != null ? "https" : "http")}://{ip}:{port}[/]")) +
         (ips.Count == 0 ? $"\n[bold]URL:[/]      {(tlsCertificate != null ? "https" : "http")}://localhost:{port}" : ""))))
@@ -475,6 +488,9 @@ var handlers = new RouteHandlers(
     csrfToken:              csrfToken,
     shareTtlSeconds:        shareTtl,
     revocationStore:        revocationStore,
+    inviteStore:            inviteStore,
+    sessionKey:             sessionKey,
+    isTls:                  tlsCertificate is not null,
     debugLog:               debugLog);
 
 // ── Console request log (with elapsed time) ──────────────────────────────────
@@ -601,8 +617,10 @@ if (authRequired)
 
     app.Use(async (ctx, next) =>
     {
-        // Share link redemption (GET /s/{token}) is always unauthenticated
-        if (ctx.Request.Method == "GET" && ctx.Request.Path.StartsWithSegments("/s"))
+        // Share link redemption and invite join are always unauthenticated
+        if (ctx.Request.Method == "GET" &&
+            (ctx.Request.Path.StartsWithSegments("/s") ||
+             ctx.Request.Path.StartsWithSegments("/join")))
         {
             await next();
             return;
@@ -712,16 +730,28 @@ if (authRequired)
     });
 }
 
-// ── CSRF validation for all state-changing POST requests ─────────────────────
+// ── CSRF validation for all state-changing requests ───────────────────────────
 // The token is generated once at startup and embedded in every served HTML page.
-// JavaScript includes it in every XHR/form submission.
+// JavaScript includes it via form field _csrf (legacy forms) or X-CSRF-Token header
+// (JSON API calls using fetch with DELETE/PATCH/PUT or application/json POST).
 // ReadFormAsync caches the parsed form, so route handlers can call it safely afterwards.
 app.Use(async (ctx, next) =>
 {
-    if (ctx.Request.Method == "POST")
+    var method = ctx.Request.Method;
+    if (method is "POST" or "DELETE" or "PATCH" or "PUT")
     {
-        var form = await ctx.Request.ReadFormAsync();
-        if (form["_csrf"] != csrfToken)
+        // 1. Accept token from request header (JSON API and non-POST verbs)
+        bool valid = ctx.Request.Headers.TryGetValue("X-CSRF-Token", out var headerToken)
+                     && headerToken == csrfToken;
+
+        // 2. For POST, also accept token from form body (HTML form submissions)
+        if (!valid && method == "POST")
+        {
+            var form = await ctx.Request.ReadFormAsync();
+            valid = form["_csrf"] == csrfToken;
+        }
+
+        if (!valid)
         {
             ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
             return;
@@ -777,6 +807,15 @@ app.MapPost("/admin/revoke/user/{username}", handlers.RevokeUser);
 app.MapPost("/admin/unrevoke/user/{username}", handlers.UnrevokeUser);
 app.MapPost("/admin/revoke/ip/{ip}",        handlers.RevokeIp);
 app.MapPost("/admin/unrevoke/ip/{ip}",      handlers.UnrevokeIp);
+
+// ── Admin: invite management ───────────────────────────────────────────────────
+app.MapPost("/admin/invites",               (Delegate)handlers.CreateInvite);
+app.MapGet("/admin/invites",                handlers.ListInvites);
+app.MapDelete("/admin/invites/{id}",        handlers.RevokeInvite);
+app.MapPatch("/admin/invites/{id}",         (Delegate)handlers.EditInvite);
+
+// ── Invite join (unauthenticated) ─────────────────────────────────────────────
+app.MapGet("/join/{token}",                 handlers.JoinWithInvite);
 
 try   { await app.RunAsync(); }
 finally

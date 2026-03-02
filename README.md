@@ -42,6 +42,7 @@ filebeam.exe --download "./share/download" --port 9000
 | `--port`               | `-p`   | `8080`               | Port to listen on                                                 |
 | `--password`           | `--pw` | _(none)_             | Shared Basic Auth password (any username accepted)                |
 | `--credentials-file`   |        | _(none)_             | Path to a per-user credentials file (see [Per-user auth](#per-user-auth)) |
+| `--invites-file`       |        | _(none)_             | Path to store invite tokens as JSON (see [Invites](#invites))     |
 | `--readonly`           | `-r`   | _(off)_              | Disable uploads; hide the upload form                             |
 | `--per-sender`         |        | _(off)_              | Bucket uploads into per-sender subfolders inside `--upload`       |
 | `--max-upload-size`    |        | _(none)_             | Max request body size: `100MB`, `2GB`, `unlimited`                |
@@ -70,6 +71,7 @@ FileBeam can load all its settings from a `filebeam.json` file so you don't have
   "upload":         "./uploads",
   "port":           9090,
   "credentialsFile": "./users.txt",
+  "invitesFile":    "./invites.json",
   "readonly":       false,
   "perSender":      false,
   "maxFileSize":    "500MB",
@@ -136,6 +138,40 @@ filebeam.exe --download ./share --credentials-file ./creds.txt
 - If the file path is a directory, or the parent directory does not exist, or the file is unreadable, FileBeam exits with an error rather than starting unprotected.
 - The file is **watched for changes** and reloaded automatically (300 ms debounce). Deleting the file at runtime locks everyone out; recreating it restores access. No restart required.
 - Credentials are loaded once per save event. Changes take effect within ~300 ms.
+
+#### Invites
+
+Invite tokens let you grant time-limited or permanent access without sharing your main credentials. When a user opens the invite link, a signed session cookie is set and they are redirected to the file browser — no password prompt needed.
+
+```
+filebeam.exe --download ./share --credentials-file ./creds.txt --invites-file ./invites.json
+```
+
+Invite management is done via the admin REST API (admin role required):
+
+| Method   | Endpoint                   | Description                           |
+| -------- | -------------------------- | ------------------------------------- |
+| `POST`   | `/admin/invites`           | Create an invite (JSON body)          |
+| `GET`    | `/admin/invites`           | List all invite tokens (JSON)         |
+| `DELETE` | `/admin/invites/{id}`      | Revoke an invite                      |
+| `PATCH`  | `/admin/invites/{id}`      | Edit name / role / expiry             |
+| `GET`    | `/join/{token}`            | Redeem invite, set session cookie, redirect to `/` |
+
+**Create body** (`Content-Type: application/json`, `X-CSRF-Token: <token>`):
+```json
+{ "friendlyName": "Alice", "role": "rw", "expiresAt": "2026-12-31T23:59:59Z" }
+```
+`role` defaults to `"rw"` if omitted. `expiresAt` is optional (omit for a non-expiring invite).
+
+**Edit body** (`PATCH`):
+```json
+{ "friendlyName": "Alice 2", "role": "ro", "clearExpiry": true }
+```
+Any field may be omitted to leave it unchanged. Set `clearExpiry: true` to remove the expiry.
+
+**Persistence:** if `--invites-file` is set, tokens are saved to a JSON file automatically on create, revoke, or edit, and reloaded at startup. Without the flag, tokens are in-memory only and lost on restart.
+
+**Revocation:** deleting a token via `DELETE /admin/invites/{id}` sets it inactive immediately. Session cookies tied to the revoked token are rejected on the next request once Phase 3 cookie-auth middleware is in place.
 
 #### Per-sender upload folders
 
