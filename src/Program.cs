@@ -478,6 +478,46 @@ Action<string, string>? debugLog = logLevel == "debug"
       }
     : null;
 
+var configJson = FileBeamConfig.ToDisplayJson(
+    download:        serveDir,
+    upload:          uploadDir,
+    port:            port,
+    credentialsFile: cliCredentialsFile,
+    invitesFile:     cliInvitesFile,
+    readOnly:        readOnly,
+    perSender:       perSender,
+    maxFileSize:     maxFileSize,
+    maxUploadBytes:  maxUploadBytes,
+    maxUploadTotal:  maxUploadTotal,
+    maxUploadSize:   maxUploadSize,
+    tlsCert:         cliTlsCert,
+    tlsKey:          cliTlsKey,
+    shareTtl:        shareTtl,
+    auditLog:        auditLogPath,
+    auditLogMaxSize: auditLogMaxSize,
+    rateLimit:       rateLimit,
+    logLevel:        logLevel);
+
+var cliCommand = FileBeamConfig.ToCliCommand(
+    download:        serveDir,
+    upload:          uploadDir,
+    port:            port,
+    credentialsFile: cliCredentialsFile,
+    invitesFile:     cliInvitesFile,
+    readOnly:        readOnly,
+    perSender:       perSender,
+    maxFileSize:     maxFileSize,
+    maxUploadBytes:  maxUploadBytes,
+    maxUploadTotal:  maxUploadTotal,
+    maxUploadSize:   maxUploadSize,
+    tlsCert:         cliTlsCert,
+    tlsKey:          cliTlsKey,
+    shareTtl:        shareTtl,
+    auditLog:        auditLogPath,
+    auditLogMaxSize: auditLogMaxSize,
+    rateLimit:       rateLimit,
+    logLevel:        logLevel);
+
 var handlers = new RouteHandlers(
     serveDir, uploadDir, fileWatcher,
     isReadOnly:             readOnly,
@@ -491,7 +531,9 @@ var handlers = new RouteHandlers(
     inviteStore:            inviteStore,
     sessionKey:             sessionKey,
     isTls:                  tlsCertificate is not null,
-    debugLog:               debugLog);
+    debugLog:               debugLog,
+    configJson:             configJson,
+    cliCommand:             cliCommand);
 
 // ── Console request log (with elapsed time) ──────────────────────────────────
 // Must be registered before route mappings so it wraps endpoint execution.
@@ -819,6 +861,9 @@ app.MapPost("/admin/revoke/user/{username}", handlers.RevokeUser);
 app.MapPost("/admin/unrevoke/user/{username}", handlers.UnrevokeUser);
 app.MapPost("/admin/revoke/ip/{ip}",        handlers.RevokeIp);
 app.MapPost("/admin/unrevoke/ip/{ip}",      handlers.UnrevokeIp);
+
+// ── Admin: config export ───────────────────────────────────────────────────────
+app.MapGet("/admin/config",                 handlers.GetAdminConfig);
 
 // ── Admin: invite management ───────────────────────────────────────────────────
 app.MapPost("/admin/invites",               (Delegate)handlers.CreateInvite);
