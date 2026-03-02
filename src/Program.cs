@@ -665,6 +665,7 @@ app.MapGet("/upload-area",                          handlers.BrowseUploadArea);
 app.MapGet("/upload-area/browse/{**subpath}",       handlers.BrowseUploadArea);
 app.MapGet("/upload-area/download/{**subpath}",     handlers.DownloadUploadAreaFile);
 app.MapGet("/upload-area/download-zip/{**subpath}", handlers.DownloadUploadAreaZip);
+app.MapPost("/upload-area/upload/{**subpath}",      handlers.UploadToUploadArea);
 app.MapGet("/disk-space",                           handlers.DiskSpace);
 app.MapGet("/events",               handlers.FileEvents);
 

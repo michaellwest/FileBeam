@@ -465,6 +465,11 @@ public class RouteHandlers(
     public Task<IResult> UploadFiles(HttpContext ctx, string? subpath)
         => Upload(ctx, subpath, redirectBase: "");
 
+    // POST /upload-area/upload/{**subpath}
+    // Same upload logic as UploadFiles but redirects back into /upload-area after success.
+    public Task<IResult> UploadToUploadArea(HttpContext ctx, string? subpath)
+        => Upload(ctx, subpath, redirectBase: "upload-area");
+
     // POST /my-uploads/upload/{**subpath}
     // Same upload logic as UploadFiles but redirects back into /my-uploads after success.
     public Task<IResult> UploadToMyUploads(HttpContext ctx, string? subpath)
