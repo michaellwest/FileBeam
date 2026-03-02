@@ -147,15 +147,18 @@ Invite tokens let you grant time-limited or permanent access without sharing you
 filebeam.exe --download ./share --credentials-file ./creds.txt --invites-file ./invites.json
 ```
 
-Invite management is done via the admin REST API (admin role required):
+Invite management is done via `GET /admin/invites` (HTML admin page, admin role required) or the REST API:
 
-| Method   | Endpoint                   | Description                           |
-| -------- | -------------------------- | ------------------------------------- |
-| `POST`   | `/admin/invites`           | Create an invite (JSON body)          |
-| `GET`    | `/admin/invites`           | List all invite tokens (JSON)         |
-| `DELETE` | `/admin/invites/{id}`      | Revoke an invite                      |
-| `PATCH`  | `/admin/invites/{id}`      | Edit name / role / expiry             |
-| `GET`    | `/join/{token}`            | Redeem invite, set signed session cookie, show welcome page |
+| Method   | Endpoint                   | Description                                                  |
+| -------- | -------------------------- | ------------------------------------------------------------ |
+| `GET`    | `/admin/invites`           | Admin UI page (HTML) — create, copy, and revoke invites      |
+| `POST`   | `/admin/invites`           | Create an invite (JSON body, `Accept: application/json`)     |
+| `GET`    | `/admin/invites`           | List all tokens (JSON when `Accept: application/json`)       |
+| `DELETE` | `/admin/invites/{id}`      | Revoke an invite                                             |
+| `PATCH`  | `/admin/invites/{id}`      | Edit name / role / expiry                                    |
+| `GET`    | `/join/{token}`            | Redeem invite, set signed session cookie, show welcome page  |
+
+The admin UI page shows active invites in a table with one-click copy-link and revoke buttons, plus a "New Invite" modal (name, role picker, expiry picker). Inactive / expired invites appear in a collapsed section. An **Invites** nav link is added to all pages when `--invites-file` is configured.
 
 **Create body** (`Content-Type: application/json`, `X-CSRF-Token: <token>`):
 ```json

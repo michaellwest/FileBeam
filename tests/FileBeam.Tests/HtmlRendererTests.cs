@@ -293,3 +293,175 @@ file static class FileInfoExtensions
     public static void WriteAllText(this FileInfo fi, string content)
         => File.WriteAllText(fi.FullName, content);
 }
+
+public sealed class InvitesAdminPageTests
+{
+    // ── BuildNavLinks — hasInvites ────────────────────────────────────────────
+
+    [Fact]
+    public void BuildNavLinks_AdminWithInvites_ContainsInvitesLink()
+    {
+        var nav = HtmlRenderer.BuildNavLinks("admin", false, false, hasInvites: true);
+        Assert.Contains("/admin/invites", nav);
+        Assert.Contains("Invites", nav);
+    }
+
+    [Fact]
+    public void BuildNavLinks_NonAdminWithInvites_NoInvitesLink()
+    {
+        var nav = HtmlRenderer.BuildNavLinks("rw", false, false, hasInvites: true);
+        Assert.DoesNotContain("/admin/invites", nav);
+    }
+
+    [Fact]
+    public void BuildNavLinks_AdminWithoutInvites_NoInvitesLink()
+    {
+        var nav = HtmlRenderer.BuildNavLinks("admin", false, false, hasInvites: false);
+        Assert.DoesNotContain("/admin/invites", nav);
+    }
+
+    // ── RenderInvitesAdmin — structure ───────────────────────────────────────
+
+    [Fact]
+    public void RenderInvitesAdmin_EmptyStore_ContainsDarkThemeAndNewButton()
+    {
+        var html = HtmlRenderer.RenderInvitesAdmin([], "tok", "http://localhost:8080");
+
+        Assert.Contains("#0f1117", html);           // dark background CSS
+        Assert.Contains("New Invite", html);        // create button
+        Assert.Contains("No active invites", html); // empty state message
+    }
+
+    [Fact]
+    public void RenderInvitesAdmin_ContainsCsrfToken()
+    {
+        var html = HtmlRenderer.RenderInvitesAdmin([], "mycsrf", "http://localhost:8080");
+        Assert.Contains("mycsrf", html);
+    }
+
+    [Fact]
+    public void RenderInvitesAdmin_ContainsNavLinks()
+    {
+        var html = HtmlRenderer.RenderInvitesAdmin([], "tok", "http://localhost:8080", navLinks: "<a href=\"/\">Home</a>");
+        Assert.Contains("<a href=\"/\">Home</a>", html);
+    }
+
+    // ── RenderInvitesAdmin — active invite rows ───────────────────────────────
+
+    [Fact]
+    public void RenderInvitesAdmin_ActiveInvite_ShowsNameAndRole()
+    {
+        var store = new InviteStore();
+        var token = store.Create("Alice", "rw", null, "admin");
+
+        var html = HtmlRenderer.RenderInvitesAdmin(store.GetAll(), "tok", "http://host");
+
+        Assert.Contains("Alice", html);
+        Assert.Contains("role-rw", html);
+        Assert.DoesNotContain("No active invites", html);
+    }
+
+    [Fact]
+    public void RenderInvitesAdmin_ActiveInvite_ContainsJoinLink()
+    {
+        var store = new InviteStore();
+        var token = store.Create("Bob", "ro", null, "admin");
+
+        var html = HtmlRenderer.RenderInvitesAdmin(store.GetAll(), "tok", "http://myhost");
+
+        Assert.Contains($"http://myhost/join/{token.Id}", html);
+    }
+
+    [Fact]
+    public void RenderInvitesAdmin_ActiveInvite_ContainsRevokeButton()
+    {
+        var store = new InviteStore();
+        var token = store.Create("Carol", "rw", null, "admin");
+
+        var html = HtmlRenderer.RenderInvitesAdmin(store.GetAll(), "tok", "http://host");
+
+        Assert.Contains("revokeInvite", html);
+        Assert.Contains(token.Id, html);
+    }
+
+    [Fact]
+    public void RenderInvitesAdmin_InviteWithExpiry_ShowsFormattedExpiry()
+    {
+        var store  = new InviteStore();
+        var expiry = new DateTimeOffset(2027, 6, 1, 12, 0, 0, TimeSpan.Zero);
+        store.Create("Dave", "ro", expiry, "admin");
+
+        var html = HtmlRenderer.RenderInvitesAdmin(store.GetAll(), "tok", "http://host");
+
+        Assert.Contains("2027-06-01", html);
+    }
+
+    [Fact]
+    public void RenderInvitesAdmin_InviteWithoutExpiry_ShowsNever()
+    {
+        var store = new InviteStore();
+        store.Create("Eve", "admin", null, "admin");
+
+        var html = HtmlRenderer.RenderInvitesAdmin(store.GetAll(), "tok", "http://host");
+
+        Assert.Contains("Never", html);
+    }
+
+    // ── RenderInvitesAdmin — inactive / expired ───────────────────────────────
+
+    [Fact]
+    public void RenderInvitesAdmin_RevokedInvite_InInactiveSection()
+    {
+        var store = new InviteStore();
+        var token = store.Create("Frank", "rw", null, "admin");
+        store.Revoke(token.Id);
+
+        var html = HtmlRenderer.RenderInvitesAdmin(store.GetAll(), "tok", "http://host");
+
+        Assert.Contains("No active invites", html);
+        Assert.Contains("Inactive", html);
+        Assert.Contains("Frank", html);
+    }
+
+    [Fact]
+    public void RenderInvitesAdmin_ExpiredInvite_InInactiveSection()
+    {
+        var store  = new InviteStore();
+        var expiry = DateTimeOffset.UtcNow.AddSeconds(-10); // already expired
+        store.Create("Grace", "rw", expiry, "admin");
+
+        var html = HtmlRenderer.RenderInvitesAdmin(store.GetAll(), "tok", "http://host");
+
+        Assert.Contains("Inactive", html);
+        Assert.Contains("Grace", html);
+    }
+
+    [Fact]
+    public void RenderInvitesAdmin_MixedActiveAndInactive_BothSectionsPresent()
+    {
+        var store = new InviteStore();
+        store.Create("Active", "rw", null, "admin");
+        var inactive = store.Create("Inactive", "ro", null, "admin");
+        store.Revoke(inactive.Id);
+
+        var html = HtmlRenderer.RenderInvitesAdmin(store.GetAll(), "tok", "http://host");
+
+        Assert.DoesNotContain("No active invites", html);
+        Assert.Contains("Inactive", html);
+        Assert.Contains("Active", html);
+    }
+
+    // ── RenderInvitesAdmin — XSS escaping ────────────────────────────────────
+
+    [Fact]
+    public void RenderInvitesAdmin_HtmlInFriendlyName_IsEscaped()
+    {
+        var store = new InviteStore();
+        store.Create("<script>alert(1)</script>", "rw", null, "admin");
+
+        var html = HtmlRenderer.RenderInvitesAdmin(store.GetAll(), "tok", "http://host");
+
+        Assert.DoesNotContain("<script>alert(1)</script>", html);
+        Assert.Contains("&lt;script&gt;", html);
+    }
+}
