@@ -17,3 +17,5 @@ share/**/*
 
 # Claude Worklog
 .claude_worklog.md
+
+*.key
