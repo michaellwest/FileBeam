@@ -9,7 +9,7 @@ public class FileBeamConfigTests
     {
         var cmd = FileBeamConfig.ToCliCommand(
             download: @"C:\files", upload: @"C:\files", port: 8080,
-            credentialsFile: null, invitesFile: null,
+            adminUsername: null, invitesFile: null,
             readOnly: false, perSender: false,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
             tlsCert: null, tlsKey: null,
@@ -26,7 +26,7 @@ public class FileBeamConfigTests
     {
         var cmd = FileBeamConfig.ToCliCommand(
             download: "/srv", upload: "/srv", port: 8080,
-            credentialsFile: null, invitesFile: null,
+            adminUsername: null, invitesFile: null,
             readOnly: false, perSender: false,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
             tlsCert: null, tlsKey: null,
@@ -41,7 +41,7 @@ public class FileBeamConfigTests
     {
         var cmd = FileBeamConfig.ToCliCommand(
             download: "/srv", upload: "/srv", port: 9090,
-            credentialsFile: null, invitesFile: null,
+            adminUsername: null, invitesFile: null,
             readOnly: false, perSender: false,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
             tlsCert: null, tlsKey: null,
@@ -56,7 +56,7 @@ public class FileBeamConfigTests
     {
         var cmd = FileBeamConfig.ToCliCommand(
             download: "/srv", upload: "/srv", port: 8080,
-            credentialsFile: null, invitesFile: null,
+            adminUsername: null, invitesFile: null,
             readOnly: false, perSender: false,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
             tlsCert: null, tlsKey: null,
@@ -71,7 +71,7 @@ public class FileBeamConfigTests
     {
         var cmd = FileBeamConfig.ToCliCommand(
             download: "/srv", upload: "/drop", port: 8080,
-            credentialsFile: null, invitesFile: null,
+            adminUsername: null, invitesFile: null,
             readOnly: false, perSender: false,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
             tlsCert: null, tlsKey: null,
@@ -87,7 +87,7 @@ public class FileBeamConfigTests
     {
         var cmd = FileBeamConfig.ToCliCommand(
             download: "/srv", upload: "/srv", port: 8080,
-            credentialsFile: null, invitesFile: null,
+            adminUsername: null, invitesFile: null,
             readOnly: true, perSender: true,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
             tlsCert: null, tlsKey: null,
@@ -99,20 +99,20 @@ public class FileBeamConfigTests
     }
 
     [Fact]
-    public void ToCliCommand_PasswordNeverIncluded()
+    public void ToCliCommand_AdminPasswordNeverIncluded()
     {
-        // ToCliCommand has no password parameter — password intentionally omitted
+        // ToCliCommand never includes --admin-password (security — use env var or key file)
         var cmd = FileBeamConfig.ToCliCommand(
             download: "/srv", upload: "/srv", port: 8080,
-            credentialsFile: null, invitesFile: null,
+            adminUsername: null, invitesFile: null,
             readOnly: false, perSender: false,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
             tlsCert: null, tlsKey: null,
             shareTtl: 3600, auditLog: null, auditLogMaxSize: 0,
             rateLimit: 60, logLevel: "info");
 
+        Assert.DoesNotContain("--admin-password", cmd);
         Assert.DoesNotContain("--password", cmd);
-        Assert.DoesNotContain("--pw", cmd);
     }
 
     [Fact]
@@ -120,7 +120,7 @@ public class FileBeamConfigTests
     {
         var cmd = FileBeamConfig.ToCliCommand(
             download: "/srv", upload: "/srv", port: 8080,
-            credentialsFile: null, invitesFile: null,
+            adminUsername: null, invitesFile: null,
             readOnly: false, perSender: false,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
             tlsCert: null, tlsKey: null,
@@ -135,7 +135,7 @@ public class FileBeamConfigTests
     {
         var cmd = FileBeamConfig.ToCliCommand(
             download: "/srv", upload: "/srv", port: 8080,
-            credentialsFile: null, invitesFile: null,
+            adminUsername: null, invitesFile: null,
             readOnly: false, perSender: false,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
             tlsCert: null, tlsKey: null,
@@ -146,20 +146,35 @@ public class FileBeamConfigTests
     }
 
     [Fact]
-    public void ToCliCommand_CredentialsAndInvitesFiles_IncludesBothFlags()
+    public void ToCliCommand_CustomAdminUsernameAndInvitesFile_IncludesBothFlags()
     {
         var cmd = FileBeamConfig.ToCliCommand(
             download: "/srv", upload: "/srv", port: 8080,
-            credentialsFile: "/etc/creds.txt", invitesFile: "/etc/invites.json",
+            adminUsername: "sysop", invitesFile: "/etc/invites.json",
             readOnly: false, perSender: false,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
             tlsCert: null, tlsKey: null,
             shareTtl: 3600, auditLog: null, auditLogMaxSize: 0,
             rateLimit: 60, logLevel: "info");
 
-        Assert.Contains("--credentials-file", cmd);
-        Assert.Contains("/etc/creds.txt", cmd);
+        Assert.Contains("--admin-username", cmd);
+        Assert.Contains("sysop", cmd);
         Assert.Contains("--invites-file", cmd);
         Assert.Contains("/etc/invites.json", cmd);
+    }
+
+    [Fact]
+    public void ToCliCommand_DefaultAdminUsername_DoesNotIncludeAdminUsernameFlag()
+    {
+        var cmd = FileBeamConfig.ToCliCommand(
+            download: "/srv", upload: "/srv", port: 8080,
+            adminUsername: null, invitesFile: null,
+            readOnly: false, perSender: false,
+            maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
+            tlsCert: null, tlsKey: null,
+            shareTtl: 3600, auditLog: null, auditLogMaxSize: 0,
+            rateLimit: 60, logLevel: "info");
+
+        Assert.DoesNotContain("--admin-username", cmd);
     }
 }

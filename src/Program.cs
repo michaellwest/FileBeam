@@ -13,8 +13,8 @@ using Spectre.Console;
 // ── Parse CLI args ─────────────────────────────────────────────────────────────
 string? cliDownloadDir      = null;
 string? cliUploadDir        = null;
-string? cliPassword         = null;
-string? cliCredentialsFile  = null;
+string? cliAdminUsername    = null;
+string? cliAdminPassword    = null;
 int?    cliPort             = null;
 bool?   cliReadOnly         = null;
 bool?   cliPerSender        = null;
@@ -41,10 +41,10 @@ for (int i = 0; i < args.Length; i++)
         cliUploadDir = args[++i];
     else if ((args[i] == "--port"        || args[i] == "-p")    && i + 1 < args.Length)
         cliPort = int.TryParse(args[++i], out var p) ? p : null;
-    else if ((args[i] == "--password"    || args[i] == "--pw")  && i + 1 < args.Length)
-        cliPassword = args[++i];
-    else if (args[i] == "--credentials-file"                    && i + 1 < args.Length)
-        cliCredentialsFile = args[++i];
+    else if (args[i] == "--admin-username"                      && i + 1 < args.Length)
+        cliAdminUsername = args[++i];
+    else if (args[i] == "--admin-password"                      && i + 1 < args.Length)
+        cliAdminPassword = args[++i];
     else if (args[i] == "--readonly"     || args[i] == "-r")
         cliReadOnly = true;
     else if (args[i] == "--per-sender")
@@ -128,7 +128,7 @@ for (int i = 0; i < args.Length; i++)
         cliDownloadDir    ??= cfg!.Download    is not null ? Path.GetFullPath(cfg.Download) : null;
         cliUploadDir      ??= cfg!.Upload      is not null ? Path.GetFullPath(cfg.Upload)   : null;
         cliPort           ??= cfg!.Port;
-        cliCredentialsFile ??= cfg!.CredentialsFile;
+        cliAdminUsername  ??= cfg!.AdminUsername;
         cliInvitesFile    ??= cfg!.InvitesFile;
         cliReadOnly       ??= cfg!.ReadOnly;
         cliPerSender      ??= cfg!.PerSender;
@@ -224,69 +224,25 @@ if (!Directory.Exists(uploadDir))
 
 int port = cliPort ?? (interactive ? AnsiConsole.Ask("[bold]Port[/]:", 8080) : 8080);
 
-string? password = cliPassword;
-
-// ── Validate and load per-user credentials file (optional) ────────────────────
-CredentialFileWatcher? credWatcher = null;
-if (!string.IsNullOrEmpty(cliCredentialsFile))
-{
-    var absCredPath = Path.GetFullPath(cliCredentialsFile);
-
-    // Hard-stop on unrecoverable config problems
-    if (Directory.Exists(absCredPath))
-    {
-        AnsiConsole.MarkupLine($"[red]Error:[/] --credentials-file path is a directory: {absCredPath}");
-        return 1;
-    }
-
-    var credDir = Path.GetDirectoryName(absCredPath)!;
-    if (!Directory.Exists(credDir))
-    {
-        AnsiConsole.MarkupLine($"[red]Error:[/] --credentials-file parent directory does not exist: {credDir}");
-        return 1;
-    }
-
-    if (File.Exists(absCredPath))
-    {
-        // Verify the file is actually readable before starting the server
-        try { _ = File.ReadAllBytes(absCredPath); }
-        catch (Exception ex)
-        {
-            AnsiConsole.MarkupLine($"[red]Error:[/] cannot read credentials file: {Markup.Escape(ex.Message)}");
-            return 1;
-        }
-
-        // Report any parse warnings at startup
-        var (_, warnings) = CredentialStore.LoadFileWithDiagnostics(absCredPath);
-        foreach (var w in warnings)
-            AnsiConsole.MarkupLine(
-                $"[yellow]Warning:[/] credentials file line {w.LineNumber}: {Markup.Escape(w.Reason)} — \"{Markup.Escape(w.LineText)}\"");
-    }
-    else
-    {
-        AnsiConsole.MarkupLine(
-            $"[yellow]Warning:[/] credentials file not found: {absCredPath} — " +
-            "server will reject all per-user logins until the file appears");
-    }
-
-    credWatcher = new CredentialFileWatcher(absCredPath);
-
-    // Log every hot-reload to the console
-    credWatcher.Reloaded += creds =>
-    {
-        var t = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
-        if (creds.Count == 0)
-            AnsiConsole.MarkupLine($"[grey]{t}[/]  [yellow][[WARN]][/]  credentials file unloaded — all per-user logins rejected");
-        else
-            AnsiConsole.MarkupLine($"[grey]{t}[/]  [blue][[INFO]][/]  credentials reloaded — {creds.Count} user{(creds.Count == 1 ? "" : "s")}");
-    };
-}
-
 // ── Invite store (optional) ────────────────────────────────────────────────────
 InviteStore inviteStore = new(cliInvitesFile is not null ? Path.GetFullPath(cliInvitesFile) : null);
 
 // ── Per-session HMAC key for signing invite cookies ───────────────────────────
 var sessionKey = RandomNumberGenerator.GetBytes(32);
+
+// ── Resolve admin credentials ─────────────────────────────────────────────────
+var adminUsername    = cliAdminUsername ?? "admin";
+var adminKeyFilePath = Path.Combine(Directory.GetCurrentDirectory(), "filebeam-admin.key");
+var adminPassword    = AdminAuth.ResolveAdminPassword(
+    Environment.GetEnvironmentVariable("FILEBEAM_ADMIN_PASSWORD"),
+    cliAdminPassword,
+    adminKeyFilePath,
+    out bool adminPasswordGenerated);
+
+if (adminPasswordGenerated)
+    AnsiConsole.MarkupLine(
+        $"[yellow bold]Admin password auto-generated:[/] {Markup.Escape(adminPassword)}\n" +
+        $"[grey]Saved to: {Markup.Escape(adminKeyFilePath)}[/]\n");
 
 // ── Validate TLS cert/key (optional) ──────────────────────────────────────────
 X509Certificate2? tlsCertificate = null;
@@ -328,24 +284,24 @@ if (cliTlsCert != null || cliTlsKey != null)
 if (printConfig)
 {
     Console.WriteLine(FileBeamConfig.ToDisplayJson(
-        download:       serveDir,
-        upload:         uploadDir,
-        port:           port,
-        credentialsFile: cliCredentialsFile,
-        invitesFile:    cliInvitesFile,
-        readOnly:       readOnly,
-        perSender:      perSender,
-        maxFileSize:    maxFileSize,
-        maxUploadBytes: maxUploadBytes,
-        maxUploadTotal: maxUploadTotal,
-        maxUploadSize:  maxUploadSize,
-        tlsCert:        cliTlsCert,
-        tlsKey:         cliTlsKey,
-        shareTtl:       shareTtl,
-        auditLog:       auditLogPath,
+        download:        serveDir,
+        upload:          uploadDir,
+        port:            port,
+        adminUsername:   adminUsername != "admin" ? adminUsername : null,
+        invitesFile:     cliInvitesFile,
+        readOnly:        readOnly,
+        perSender:       perSender,
+        maxFileSize:     maxFileSize,
+        maxUploadBytes:  maxUploadBytes,
+        maxUploadTotal:  maxUploadTotal,
+        maxUploadSize:   maxUploadSize,
+        tlsCert:         cliTlsCert,
+        tlsKey:          cliTlsKey,
+        shareTtl:        shareTtl,
+        auditLog:        auditLogPath,
         auditLogMaxSize: auditLogMaxSize,
-        rateLimit:      rateLimit,
-        logLevel:       logLevel));
+        rateLimit:       rateLimit,
+        logLevel:        logLevel));
     return 0;
 }
 
@@ -372,17 +328,10 @@ var panel = new Panel(
         (readOnly     ? "[bold yellow]Mode:[/]     Read-only (uploads disabled)\n" : "") +
         (logLevel != "info" ? $"[bold]Log:[/]      {logLevel}\n" : "") +
         (tlsCertificate != null ? "[bold green]TLS:[/]      HTTPS enabled\n" : "") +
-        (credWatcher is not null
-            ? credWatcher.Current.Count > 0
-                ? $"[bold]Auth:[/]     {credWatcher.Current.Count} per-user credential{(credWatcher.Current.Count == 1 ? "" : "s")} loaded" +
-                  (tlsCertificate is null ? " [yellow](HTTP — credentials unencrypted)[/]" : "") + "\n"
-                : "[bold yellow]Auth:[/]     Per-user credentials enforced (0 valid entries — all logins rejected)" +
-                  (tlsCertificate is null ? " [yellow](HTTP — credentials unencrypted)[/]" : "") + "\n"
-            : "") +
-        (!string.IsNullOrEmpty(password)
-            ? "[bold]Auth:[/]     Shared password required" +
-              (tlsCertificate is null ? " [yellow](HTTP — credentials unencrypted)[/]" : "") + "\n"
-            : "") +
+        $"[bold]Admin:[/]    {Markup.Escape(adminUsername)}" +
+        (adminPasswordGenerated
+            ? " [yellow](auto-generated — printed above)[/]"
+            : tlsCertificate is null ? " [yellow](HTTP — credentials unencrypted)[/]" : "") + "\n" +
         (cliInvitesFile is not null
             ? $"[bold]Invites:[/]  {inviteStore.GetAll().Count} token{(inviteStore.GetAll().Count == 1 ? "" : "s")} loaded from {Markup.Escape(Path.GetFileName(cliInvitesFile))}\n"
             : "") +
@@ -482,7 +431,7 @@ var configJson = FileBeamConfig.ToDisplayJson(
     download:        serveDir,
     upload:          uploadDir,
     port:            port,
-    credentialsFile: cliCredentialsFile,
+    adminUsername:   adminUsername != "admin" ? adminUsername : null,
     invitesFile:     cliInvitesFile,
     readOnly:        readOnly,
     perSender:       perSender,
@@ -502,7 +451,7 @@ var cliCommand = FileBeamConfig.ToCliCommand(
     download:        serveDir,
     upload:          uploadDir,
     port:            port,
-    credentialsFile: cliCredentialsFile,
+    adminUsername:   adminUsername != "admin" ? adminUsername : null,
     invitesFile:     cliInvitesFile,
     readOnly:        readOnly,
     perSender:       perSender,
@@ -610,19 +559,10 @@ app.Use(async (ctx, next) =>
                 };
                 if (auditAction is not null)
                 {
-                    // Extract Basic Auth username (if any); never log the password
-                    string? auditUser = null;
-                    var authHdr = ctx.Request.Headers.Authorization.ToString();
-                    if (authHdr.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
-                    {
-                        try
-                        {
-                            var decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(authHdr[6..]));
-                            var colon   = decoded.IndexOf(':');
-                            if (colon > 0) auditUser = decoded[..colon];
-                        }
-                        catch { /* malformed header */ }
-                    }
+                    // Use the username set by the auth middleware (works for all auth methods)
+                    string? auditUser = ctx.Items.TryGetValue("fb.user", out var fbUserObj) && fbUserObj is string fbUserStr
+                        ? fbUserStr
+                        : null;
 
                     var auditBytes = ctx.Items.TryGetValue("fb.bytes", out var ab) && ab is long lb ? lb : 0L;
                     auditLogger.Log(time, auditUser, ip, auditAction, path, auditBytes, status);
@@ -643,19 +583,15 @@ static string FormatBytes(long bytes) => bytes switch
 // ── Rate limiter middleware ────────────────────────────────────────────────────
 app.UseRateLimiter();
 
-// ── Basic Auth + brute-force lockout (optional) ───────────────────────────────
-// authRequired is true whenever --credentials-file was specified (even if file is
-// currently missing) so that the server never silently starts unprotected.
-bool authRequired = !string.IsNullOrEmpty(password) || credWatcher is not null;
-if (authRequired)
+// ── Auth middleware (always active — admin account always exists) ─────────────
+// Per-IP failed-attempt tracking. Entries are trimmed when the dict grows large
+// to prevent unbounded memory growth from spoofed source IPs.
 {
-    // Per-IP failed-attempt tracking.  Entries are trimmed when the dict grows large
-    // to prevent unbounded memory growth from spoofed source IPs.
     var authState = new Dictionary<string, (int Failures, DateTimeOffset LockedUntil)>();
     var authLock  = new object();
-    const int    MaxFailures     = 10;
-    const int    LockoutSeconds  = 60;
-    const int    MaxTrackedIPs   = 10_000;
+    const int MaxFailures    = 10;
+    const int LockoutSeconds = 60;
+    const int MaxTrackedIPs  = 10_000;
 
     app.Use(async (ctx, next) =>
     {
@@ -677,7 +613,7 @@ if (authRequired)
             return;
         }
 
-        // Check lockout before touching the header
+        // Check brute-force lockout
         bool locked;
         lock (authLock)
         {
@@ -693,11 +629,28 @@ if (authRequired)
         }
 
         bool authenticated = false;
+        var  header        = ctx.Request.Headers.Authorization.ToString();
 
-        // Cookie session check (invite-based auth) — checked before Basic Auth so
-        // browser users who joined via an invite link don't need to re-enter credentials.
+        // 1. Basic Auth — admin username + password → role "admin"
+        if (AdminAuth.TryAdminBasicAuth(header, adminUsername, adminPassword, out var basicUser))
+        {
+            ctx.Items["fb.role"] = "admin";
+            ctx.Items["fb.user"] = basicUser;
+            authenticated = true;
+        }
+
+        // 2. Bearer token — invite store lookup (UseCount NOT incremented)
+        if (!authenticated &&
+            AdminAuth.TryBearerAuth(header, inviteStore, out var bearerRole, out var bearerUser))
+        {
+            ctx.Items["fb.role"] = bearerRole;
+            ctx.Items["fb.user"] = bearerUser;
+            authenticated = true;
+        }
+
+        // 3. Session cookie — invite-based browser auth
         var sessionCookie = ctx.Request.Cookies["fb.session"];
-        if (sessionCookie is not null &&
+        if (!authenticated && sessionCookie is not null &&
             RouteHandlers.TryValidateSessionCookie(sessionCookie, sessionKey, inviteStore, out var cookieRole, out var cookieUser))
         {
             ctx.Items["fb.role"] = cookieRole;
@@ -705,54 +658,8 @@ if (authRequired)
             authenticated = true;
         }
 
-        var header = ctx.Request.Headers.Authorization.ToString();
-        if (!authenticated && header.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
-        {
-            try
-            {
-                var decoded  = Encoding.UTF8.GetString(Convert.FromBase64String(header[6..]));
-                var colon    = decoded.IndexOf(':');
-                if (colon >= 0)
-                {
-                    var submittedUser = decoded[..colon];
-                    var submittedPass = decoded[(colon + 1)..];
-
-                    // 1. Check per-user credentials (username AND password must match).
-                    //    Read Current snapshot once — it may be hot-swapped by the file watcher.
-                    if (credWatcher?.Current.TryGetValue(submittedUser, out var userCred) == true)
-                    {
-                        authenticated = CredentialStore.VerifyPassword(submittedPass, userCred.Password);
-                        if (authenticated)
-                        {
-                            // Username ban check — immediate revocation even with valid credentials
-                            if (revocationStore.IsUserRevoked(submittedUser))
-                                authenticated = false;
-                            else
-                            {
-                                ctx.Items["fb.role"] = userCred.Role;
-                                ctx.Items["fb.user"] = submittedUser;
-                            }
-                        }
-                    }
-
-                    // 2. Fall back to shared password (any username accepted) — role is rw
-                    if (!authenticated && !string.IsNullOrEmpty(password))
-                    {
-                        authenticated = CredentialStore.VerifyPassword(submittedPass, password);
-                        if (authenticated)
-                        {
-                            ctx.Items["fb.role"] = "rw";
-                            ctx.Items["fb.user"] = submittedUser;
-                        }
-                    }
-                }
-            }
-            catch { /* malformed Base64 — fall through to 401 */ }
-        }
-
         if (authenticated)
         {
-            // Clear any recorded failures for this IP on successful login
             lock (authLock) authState.Remove(ip);
             await next();
             return;
@@ -763,7 +670,6 @@ if (authRequired)
 
         lock (authLock)
         {
-            // Trim stale entries when the table grows large
             if (authState.Count >= MaxTrackedIPs)
             {
                 var cutoff = DateTimeOffset.UtcNow.AddMinutes(-10);
@@ -877,7 +783,6 @@ app.MapGet("/join/{token}",                 handlers.JoinWithInvite);
 try   { await app.RunAsync(); }
 finally
 {
-    credWatcher?.Dispose();
     if (auditLogger is not null) await auditLogger.DisposeAsync();
 }
 return 0;

@@ -8,7 +8,7 @@ A dead-simple LAN file server. Run it, share the URL, your colleague downloads (
 - ⬇️ Download files with **resume support** (HTTP range requests)
 - ⬆️ Upload files via drag-and-drop or file picker (up to 100 GB)
 - 🗑️ Delete and rename files directly from the browser
-- 🔒 Optional Basic Auth — shared password or per-user credentials
+- 🔒 Admin account with Basic Auth — password auto-generated or configurable
 - 🚫 Read-only mode to disable uploads
 - 📥 Per-sender upload folders — each contributor's files land in their own subfolder
 - 🔄 Live reload — the browser updates automatically when files change
@@ -40,8 +40,8 @@ filebeam.exe --download "./share/download" --port 9000
 | `--download`           | `-s`   | Current directory    | Directory to browse and serve                                     |
 | `--upload`             | `-d`   | Same as `--download` | Upload destination (private; not visible to browsers)             |
 | `--port`               | `-p`   | `8080`               | Port to listen on                                                 |
-| `--password`           | `--pw` | _(none)_             | Shared Basic Auth password (any username accepted)                |
-| `--credentials-file`   |        | _(none)_             | Path to a per-user credentials file (see [Per-user auth](#per-user-auth)) |
+| `--admin-username`     |        | `admin`              | Username for the built-in admin account                           |
+| `--admin-password`     |        | _(auto-generated)_   | Admin password (or set `FILEBEAM_ADMIN_PASSWORD` env var)         |
 | `--invites-file`       |        | _(none)_             | Path to store invite tokens as JSON (see [Invites](#invites))     |
 | `--readonly`           | `-r`   | _(off)_              | Disable uploads; hide the upload form                             |
 | `--per-sender`         |        | _(off)_              | Bucket uploads into per-sender subfolders inside `--upload`       |
@@ -62,7 +62,7 @@ FileBeam can load all its settings from a `filebeam.json` file so you don't have
 
 **Precedence:** hardcoded defaults → config file → CLI flags. CLI flags always win, so you can override a saved setting without editing the file.
 
-**Passwords are intentionally omitted** from config files — pass `--password` on the CLI or use `--credentials-file` for per-user auth.
+**`adminPassword` is intentionally excluded** from config files — pass `--admin-password` on the CLI, set `FILEBEAM_ADMIN_PASSWORD`, or let FileBeam auto-generate one and save it to `filebeam-admin.key`.
 
 ```jsonc
 // filebeam.json
@@ -70,7 +70,7 @@ FileBeam can load all its settings from a `filebeam.json` file so you don't have
   "download":       "./files",
   "upload":         "./uploads",
   "port":           9090,
-  "credentialsFile": "./users.txt",
+  "adminUsername":  "admin",
   "invitesFile":    "./invites.json",
   "readonly":       false,
   "perSender":      false,
@@ -115,39 +115,56 @@ filebeam.exe --download ./share --tls-cert filebeam.crt --tls-key filebeam.key
 
 Clients connecting to a self-signed cert will see a browser warning; you can add the CA to your trust store to suppress it.
 
-#### Per-user auth
+#### Admin account
 
-`--credentials-file` points to a plain-text file with one `username:password` entry per line.
-Lines starting with `#` and blank lines are ignored. Passwords may contain colons — only the first colon is the delimiter. Duplicate usernames: last entry wins.
+FileBeam always requires authentication. On first run, if no password is configured, it **auto-generates a 16-character random password**, prints it prominently in the terminal, and saves it to `filebeam-admin.key` in the working directory. On subsequent restarts the key file is read automatically, so the password survives without re-entering it.
+
+**Password resolution order** (first match wins):
+1. `FILEBEAM_ADMIN_PASSWORD` environment variable — ideal for scripts and containers
+2. `--admin-password <pass>` CLI flag — convenient for one-offs (appears in process list)
+3. `filebeam-admin.key` file in the working directory — auto-read on restart
+4. Auto-generate and write to `filebeam-admin.key`
 
 ```
-# creds.txt
-alice:S3cret!Pass
-bob:AnotherPass123
+# Set a password via environment variable (recommended for production)
+FILEBEAM_ADMIN_PASSWORD=mysecret filebeam.exe --download ./share
+
+# Or pass it directly (visible in process list)
+filebeam.exe --download ./share --admin-password mysecret
+
+# Or let FileBeam generate one — it prints to console and saves to filebeam-admin.key
+filebeam.exe --download ./share
 ```
 
-```
-filebeam.exe --download ./share --credentials-file ./creds.txt
-```
-
-`--password` and `--credentials-file` can be used together. A request is authenticated when it matches **either** a per-user entry **or** the shared password.
-
-**Safeguards:**
-- If the file is missing at startup, FileBeam **still enforces auth** — all logins are rejected until the file appears. A warning is printed to the console.
-- Malformed lines (missing `:`, empty username, empty password) are skipped with a per-line warning showing the line number.
-- If the file path is a directory, or the parent directory does not exist, or the file is unreadable, FileBeam exits with an error rather than starting unprotected.
-- The file is **watched for changes** and reloaded automatically (300 ms debounce). Deleting the file at runtime locks everyone out; recreating it restores access. No restart required.
-- Credentials are loaded once per save event. Changes take effect within ~300 ms.
+The admin account uses the username `admin` by default; override with `--admin-username <name>`.
 
 #### Invites
 
-Invite tokens let you grant time-limited or permanent access without sharing your main credentials. When a user opens the invite link, a signed session cookie is set and they are redirected to the file browser — no password prompt needed.
+Invite tokens let you grant time-limited or permanent access to other users without sharing the admin password. Each token can be used as a **browser join link** or a **CLI Bearer token** — they share the same invite ID.
 
 ```
-filebeam.exe --download ./share --credentials-file ./creds.txt --invites-file ./invites.json
+filebeam.exe --download ./share --invites-file ./invites.json
 ```
 
-Invite management is done via `GET /admin/invites` (HTML admin page, admin role required) or the REST API:
+**Browser access:** the recipient visits `http://host/join/{id}`. FileBeam sets a signed `fb.session` cookie (HMAC-SHA256, HttpOnly, SameSite=Lax) and redirects to the file browser — no password prompt needed.
+
+**CLI / API access:** use the token ID as an HTTP Bearer token:
+
+```bash
+# Download a file using a Bearer token
+curl -H "Authorization: Bearer <invite-id>" http://host/download/report.pdf -o report.pdf
+
+# PowerShell
+Invoke-WebRequest http://host/download/report.pdf `
+  -Headers @{ Authorization = "Bearer <invite-id>" } `
+  -OutFile report.pdf
+```
+
+> ⚠ **Security note:** sharing the browser join link also exposes the Bearer token ID — both grant the same access. Use TLS (`--tls-cert` / `--tls-key`) when transmitting Bearer tokens over untrusted networks. Revoking an invite immediately invalidates both the cookie sessions and Bearer token.
+
+**UseCount tracking:** Bearer token usage does **not** increment the invite's `useCount` — that counter only reflects browser `/join` events.
+
+**Invite management** is done via `GET /admin/invites` (HTML admin page, admin role required) or the REST API:
 
 | Method   | Endpoint                   | Description                                                  |
 | -------- | -------------------------- | ------------------------------------------------------------ |
@@ -158,7 +175,7 @@ Invite management is done via `GET /admin/invites` (HTML admin page, admin role 
 | `PATCH`  | `/admin/invites/{id}`      | Edit name / role / expiry                                    |
 | `GET`    | `/join/{token}`            | Redeem invite, set signed session cookie, show welcome page  |
 
-The admin UI page shows active invites in a table with one-click copy-link and revoke buttons, plus a "New Invite" modal (name, role picker, expiry picker). Inactive / expired invites appear in a collapsed section. An **Invites** nav link is added to all pages when `--invites-file` is configured.
+The admin UI page shows active invites in a table with one-click copy buttons for the join link (🔗) and Bearer token (⌨), plus a revoke button. The **New Invite** modal shows both the browser join URL and the `Bearer <id>` string after creation. Inactive / expired invites appear in a collapsed section. An **Invites** nav link is added to all pages when `--invites-file` is configured.
 
 **Create body** (`Content-Type: application/json`, `X-CSRF-Token: <token>`):
 ```json
@@ -174,9 +191,9 @@ Any field may be omitted to leave it unchanged. Set `clearExpiry: true` to remov
 
 **Persistence:** if `--invites-file` is set, tokens are saved to a JSON file automatically on create, revoke, or edit, and reloaded at startup. Without the flag, tokens are in-memory only and lost on restart.
 
-**Session cookies:** when a user visits their invite link, FileBeam sets a signed `fb.session` cookie (HMAC-SHA256, HttpOnly, SameSite=Lax). On subsequent requests the auth middleware verifies the signature and checks that the invite token is still active — revoking an invite immediately invalidates all cookies linked to it on the next request. The welcome page shown after joining includes a note for CLI users, who must use Basic Auth credentials if configured.
+**Session cookies:** when a user visits their invite link, FileBeam sets a signed `fb.session` cookie (HMAC-SHA256, HttpOnly, SameSite=Lax). On subsequent requests the auth middleware verifies the signature and checks that the invite token is still active — revoking an invite immediately invalidates all cookies linked to it on the next request.
 
-**Revocation:** deleting a token via `DELETE /admin/invites/{id}` sets it inactive immediately. All browser sessions issued via that invite are rejected from the next request onward.
+**Revocation:** `DELETE /admin/invites/{id}` sets the token inactive immediately. All browser sessions and Bearer token requests using that invite are rejected from the next request onward.
 
 #### Admin config export
 
@@ -195,8 +212,9 @@ The underlying data is also available as a plain JSON API endpoint:
 
 When `--per-sender` is set, each uploader's files land in their own subfolder inside the upload directory:
 
-- If Basic Auth is enabled (`--password` or `--credentials-file`), the subfolder is named after the **username**.
-- Otherwise, it is named after the sender's **IP address**.
+- If the user is authenticated via Basic Auth (admin) the subfolder is named after the **admin username**.
+- If authenticated via an invite (Bearer token or session cookie) the subfolder is named after the invite's **friendly name**.
+- Otherwise (unauthenticated, if auth is somehow bypassed) it is named after the sender's **IP address**.
 
 ```
 filebeam.exe --download ./share/download --upload ./share/upload --per-sender
@@ -341,8 +359,8 @@ docker run -p 8080:8080 filebeam
 Append any FileBeam flags after the image name:
 
 ```bash
-# Password-protected, read-only
-docker run -p 8080:8080 -v /data:/srv/share filebeam --password secret --readonly
+# Set admin password via env var, read-only mode
+docker run -p 8080:8080 -v /data:/srv/share -e FILEBEAM_ADMIN_PASSWORD=secret filebeam --readonly
 
 # Per-sender upload folders (separate upload volume)
 docker run -p 8080:8080 -v /data/share:/srv/share -v /data/inbox:/srv/drop filebeam \
@@ -366,7 +384,7 @@ docker compose down         # stop
 ```
 
 Files are served from the `./share` directory next to the compose file.
-To add a password, enable read-only mode, or activate per-sender folders, add a `command` override:
+To set a password, enable read-only mode, or activate per-sender folders, add `environment` and `command` overrides:
 
 ```yaml
 services:
@@ -377,7 +395,9 @@ services:
     volumes:
       - ./share:/srv/share
     restart: unless-stopped
-    command: ["--password", "secret", "--readonly"]
+    environment:
+      - FILEBEAM_ADMIN_PASSWORD=secret
+    command: ["--readonly"]
 ```
 
 Per-sender example with a separate drop volume:
@@ -415,9 +435,10 @@ Output: `src\bin\Release\net10.0\win-x64\publish\filebeam.exe`
 
 ## Security notes
 
-- **Authentication is optional.** Use `--password` (shared) or `--credentials-file` (per-user) to enable Basic Auth for trusted-but-not-open LAN scenarios. Both can be active at the same time. Without auth, anyone on the network can access the server.
-- **Credentials file permissions.** The credentials file contains plaintext passwords. Restrict read access to the user running FileBeam (e.g. `chmod 600 creds.txt` on Linux/macOS). On Windows, use NTFS ACLs to limit access.
-- **No HTTPS.** Intended for LAN use — add a reverse proxy if you need TLS. Basic Auth credentials are transmitted in the clear over HTTP.
+- **Authentication is always required.** FileBeam always creates an admin account. If no password is configured, one is auto-generated and saved to `filebeam-admin.key`. Keep this file private — anyone who reads it gains admin access.
+- **Key file permissions.** Restrict read access to `filebeam-admin.key` (e.g. `chmod 600 filebeam-admin.key` on Linux/macOS, NTFS ACLs on Windows). Prefer `FILEBEAM_ADMIN_PASSWORD` env var for non-interactive deployments.
+- **Bearer tokens and join links share the same ID.** Distributing a join link exposes the Bearer token for API access. Use TLS (`--tls-cert`/`--tls-key`) when transmitting Bearer tokens over networks you don't fully control.
+- **No HTTPS by default.** Intended for LAN use — add a reverse proxy or use `--tls-cert`/`--tls-key` if you need TLS. Without TLS, credentials are transmitted in the clear.
 - Path traversal is blocked; requests cannot escape the served directory.
 - Filenames are sanitised on upload (directory components stripped).
 

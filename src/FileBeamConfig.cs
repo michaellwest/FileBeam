@@ -7,15 +7,15 @@ namespace FileBeam;
 /// <summary>
 /// Represents the contents of a filebeam.json config file.
 /// All fields are optional; CLI flags override any values set here.
-/// NOTE: passwords are intentionally not supported — pass --password via CLI
-///       or use --credentials-file for per-user authentication.
+/// NOTE: adminPassword is intentionally excluded — pass via --admin-password CLI flag
+///       or FILEBEAM_ADMIN_PASSWORD environment variable.
 /// </summary>
 internal sealed class FileBeamConfig
 {
     [JsonPropertyName("download")]        public string? Download        { get; init; }
     [JsonPropertyName("upload")]          public string? Upload          { get; init; }
     [JsonPropertyName("port")]            public int?    Port            { get; init; }
-    [JsonPropertyName("credentialsFile")] public string? CredentialsFile { get; init; }
+    [JsonPropertyName("adminUsername")]   public string? AdminUsername   { get; init; }
     [JsonPropertyName("invitesFile")]     public string? InvitesFile     { get; init; }
     [JsonPropertyName("readonly")]        public bool?   ReadOnly        { get; init; }
     [JsonPropertyName("perSender")]       public bool?   PerSender       { get; init; }
@@ -62,14 +62,14 @@ internal sealed class FileBeamConfig
 
     /// <summary>
     /// Builds an equivalent CLI invocation string for the given resolved configuration.
-    /// The --password flag is always omitted; all other flags that differ from their defaults
-    /// (or are non-null) are included.
+    /// The --admin-password flag is always omitted; all other flags that differ from their
+    /// defaults (or are non-null) are included.
     /// </summary>
     public static string ToCliCommand(
         string  download,
         string  upload,
         int     port,
-        string? credentialsFile,
+        string? adminUsername,
         string? invitesFile,
         bool    readOnly,
         bool    perSender,
@@ -91,8 +91,9 @@ internal sealed class FileBeamConfig
             sb.Append($" --upload \"{upload}\"");
         if (port != 8080)
             sb.Append($" --port {port}");
-        if (credentialsFile != null)
-            sb.Append($" --credentials-file \"{credentialsFile}\"");
+        if (adminUsername != null && adminUsername != "admin")
+            sb.Append($" --admin-username \"{adminUsername}\"");
+        // --admin-password intentionally omitted
         if (invitesFile != null)
             sb.Append($" --invites-file \"{invitesFile}\"");
         if (readOnly)
@@ -121,19 +122,18 @@ internal sealed class FileBeamConfig
             sb.Append($" --rate-limit {rateLimit}");
         if (logLevel != "info")
             sb.Append($" --log-level {logLevel}");
-        // --password intentionally omitted
         return sb.ToString();
     }
 
     /// <summary>
     /// Serializes the effective resolved configuration to indented JSON for display.
-    /// Fields that map to the given effective values are included; password is always omitted.
+    /// Fields that map to the given effective values are included; adminPassword is always omitted.
     /// </summary>
     public static string ToDisplayJson(
         string  download,
         string  upload,
         int     port,
-        string? credentialsFile,
+        string? adminUsername,
         string? invitesFile,
         bool    readOnly,
         bool    perSender,
@@ -151,12 +151,12 @@ internal sealed class FileBeamConfig
     {
         var obj = new
         {
-            // _passwordOmitted is a hint for readers; the JSON key name is intentional
-            _note          = "password is intentionally omitted — pass via --password flag",
+            // adminPassword is intentionally excluded
+            _note          = "adminPassword is intentionally omitted — use --admin-password flag or FILEBEAM_ADMIN_PASSWORD env var",
             download,
             upload,
             port,
-            credentialsFile,
+            adminUsername,
             invitesFile,
             @readonly      = readOnly,
             perSender,

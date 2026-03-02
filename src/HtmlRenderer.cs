@@ -573,7 +573,10 @@ nav a{font-size:.82rem;color:#aaa;white-space:nowrap}
         if (active.Count == 0)
             sb.Append("<p class=\"empty-msg\">No active invites. Create one to get started.</p>\n");
         else
+        {
             sb.Append(BuildInviteRows(active, baseUrl, active: true));
+            sb.Append("<p style=\"font-size:.78rem;color:#555;margin-top:.75rem\">&#x26a0; The Bearer token and join link share the same invite ID — sharing the link grants both browser and API access.</p>\n");
+        }
         sb.Append("</div>\n");
 
         // ── Inactive / expired invites ──────────────────────────────────────
@@ -616,10 +619,15 @@ nav a{font-size:.82rem;color:#aaa;white-space:nowrap}
       </label>
       <div id="create-err" style="color:#f66;font-size:.82rem;min-height:1.2em"></div>
       <div id="link-result" hidden style="margin-top:.75rem">
-        <div style="font-size:.82rem;color:#888;margin-bottom:.35rem">Share this link with the recipient:</div>
+        <div style="font-size:.82rem;color:#888;margin-bottom:.35rem">Browser join link:</div>
         <div class="link-row">
           <input id="link-url" class="form-inp" readonly>
           <button class="btn btn-sm" id="copy-btn" onclick="copyGeneratedLink()">Copy</button>
+        </div>
+        <div style="font-size:.82rem;color:#888;margin:.5rem 0 .35rem">CLI / API Bearer token:</div>
+        <div class="link-row">
+          <input id="link-bearer" class="form-inp" readonly>
+          <button class="btn btn-sm" id="copy-bearer-btn" onclick="copyGeneratedBearer()">Copy</button>
         </div>
       </div>
     </div>
@@ -672,6 +680,7 @@ async function createInvite() {
     if (!res.ok) throw new Error(await res.text());
     const token = await res.json();
     document.getElementById('link-url').value = location.origin + '/join/' + token.id;
+    document.getElementById('link-bearer').value = 'Bearer ' + token.id;
     document.getElementById('link-result').hidden = false;
     btn.textContent = 'Created \u2713';
     _reloadOnClose = true;
@@ -704,9 +713,25 @@ function copyGeneratedLink() {
   });
 }
 
+function copyGeneratedBearer() {
+  const val = document.getElementById('link-bearer').value;
+  fbCopy(val).then(() => {
+    const btn = document.getElementById('copy-bearer-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 1600);
+  });
+}
+
 function copyInviteLink(id, url) {
   fbCopy(url).then(() => {
     const btn = document.getElementById('cp-' + id);
+    if (btn) { const orig = btn.textContent; btn.textContent = '\u2713'; setTimeout(() => btn.textContent = orig, 1600); }
+  });
+}
+
+function copyBearerToken(id) {
+  fbCopy('Bearer ' + id).then(() => {
+    const btn = document.getElementById('cb-' + id);
     if (btn) { const orig = btn.textContent; btn.textContent = '\u2713'; setTimeout(() => btn.textContent = orig, 1600); }
   });
 }
@@ -743,6 +768,9 @@ async function revokeInvite(id) {
             var copyBtn    = active
                 ? $"<button class=\"act-btn\" id=\"cp-{idAttr}\" title=\"Copy invite link\" onclick=\"copyInviteLink('{idAttr}','{linkJs}')\">🔗</button>"
                 : "";
+            var bearerBtn  = active
+                ? $"<button class=\"act-btn\" id=\"cb-{idAttr}\" title=\"Copy Bearer token\" onclick=\"copyBearerToken('{idAttr}')\">⌨</button>"
+                : "";
             var revokeBtn  = t.IsActive
                 ? $"<button class=\"act-btn\" title=\"Revoke invite\" onclick=\"revokeInvite('{idAttr}')\">🚫</button>"
                 : "<span style=\"font-size:.78rem;color:#555\">revoked</span>";
@@ -753,7 +781,7 @@ async function revokeInvite(id) {
       <td><span class="{roleClass}">{HttpUtility.HtmlEncode(t.Role)}</span></td>
       <td style="color:#888;font-size:.82rem">{expiry}</td>
       <td style="text-align:right;color:#888">{t.UseCount}</td>
-      <td class="actions">{copyBtn}{revokeBtn}</td>
+      <td class="actions">{copyBtn}{bearerBtn}{revokeBtn}</td>
     </tr>
 """);
         }
