@@ -1047,7 +1047,8 @@ public class RouteHandlers(
             return Results.BadRequest($"Invalid role '{role}'. Valid roles: {string.Join(", ", validRoles)}.");
 
         var creator = ctx.Items.TryGetValue("fb.user", out var u) && u is string s ? s : "admin";
-        var token   = inviteStore.Create(req.FriendlyName.Trim(), role, req.ExpiresAt, creator);
+        var token   = inviteStore.Create(req.FriendlyName.Trim(), role, req.ExpiresAt, creator,
+            req.JoinMaxUses, req.BearerMaxUses);
 
         return Results.Json(TokenToDto(token), statusCode: StatusCodes.Status201Created);
     }
@@ -1122,10 +1123,14 @@ public class RouteHandlers(
             return Results.BadRequest($"Invalid role '{req.Role}'.");
 
         if (!inviteStore.Edit(id,
-                friendlyName: req.FriendlyName?.Trim(),
-                role:         req.Role?.ToLowerInvariant(),
-                expiresAt:    req.ExpiresAt,
-                clearExpiry:  req.ClearExpiry))
+                friendlyName:         req.FriendlyName?.Trim(),
+                role:                 req.Role?.ToLowerInvariant(),
+                expiresAt:            req.ExpiresAt,
+                clearExpiry:          req.ClearExpiry,
+                joinMaxUses:          req.JoinMaxUses,
+                bearerMaxUses:        req.BearerMaxUses,
+                clearJoinMaxUses:     req.ClearJoinMaxUses,
+                clearBearerMaxUses:   req.ClearBearerMaxUses))
             return Results.NotFound($"Invite '{id}' not found.");
 
         inviteStore.TryGet(id, out var updated);
@@ -1184,24 +1189,33 @@ public class RouteHandlers(
     private sealed record InviteCreateRequest(
         string          FriendlyName,
         string?         Role,
-        DateTimeOffset? ExpiresAt);
+        DateTimeOffset? ExpiresAt,
+        int?            JoinMaxUses   = null,
+        int?            BearerMaxUses = null);
 
     private sealed record InviteEditRequest(
         string?         FriendlyName,
         string?         Role,
         DateTimeOffset? ExpiresAt,
-        bool            ClearExpiry = false);
+        bool            ClearExpiry        = false,
+        int?            JoinMaxUses        = null,
+        int?            BearerMaxUses      = null,
+        bool            ClearJoinMaxUses   = false,
+        bool            ClearBearerMaxUses = false);
 
     private static object TokenToDto(InviteToken t) => new
     {
-        id           = t.Id,
-        friendlyName = t.FriendlyName,
-        role         = t.Role,
-        expiresAt    = t.ExpiresAt?.ToString("o"),
-        useCount     = t.UseCount,
-        createdBy    = t.CreatedBy,
-        isActive     = t.IsActive,
-        createdAt    = t.CreatedAt.ToString("o"),
+        id             = t.Id,
+        friendlyName   = t.FriendlyName,
+        role           = t.Role,
+        expiresAt      = t.ExpiresAt?.ToString("o"),
+        useCount       = t.UseCount,
+        joinMaxUses    = t.JoinMaxUses,
+        bearerUseCount = t.BearerUseCount,
+        bearerMaxUses  = t.BearerMaxUses,
+        createdBy      = t.CreatedBy,
+        isActive       = t.IsActive,
+        createdAt      = t.CreatedAt.ToString("o"),
     };
 
     private static string Base64UrlEncode(byte[] data) =>

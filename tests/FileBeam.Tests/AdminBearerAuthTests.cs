@@ -82,17 +82,17 @@ public sealed class AdminBearerAuthTests
     }
 
     [Fact]
-    public void BearerAuth_DoesNotIncrementUseCount()
+    public void BearerAuth_DoesNotIncrementJoinUseCount()
     {
         var store  = new InviteStore();
         var invite = store.Create("Bob", "ro", null, "admin");
-        var initialCount = invite.UseCount;
 
         AdminAuth.TryBearerAuth($"Bearer {invite.Id}", store, out _, out _);
         AdminAuth.TryBearerAuth($"Bearer {invite.Id}", store, out _, out _);
 
         store.TryGet(invite.Id, out var updated);
-        Assert.Equal(initialCount, updated!.UseCount);
+        Assert.Equal(0, updated!.UseCount);        // join count unchanged
+        Assert.Equal(2, updated!.BearerUseCount);  // Bearer counter incremented
     }
 
     [Fact]

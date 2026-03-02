@@ -101,8 +101,9 @@ internal static class AdminAuth
 
     /// <summary>
     /// Tries to authenticate via HTTP Bearer token.
-    /// Validates the token ID against the invite store using <see cref="InviteStore.TryGet"/>
-    /// — UseCount is NOT incremented (that only happens on browser /join).
+    /// Delegates to <see cref="InviteStore.TryBearerAuthenticate"/> which validates activity,
+    /// expiry, and the Bearer cap, then atomically increments <see cref="InviteToken.BearerUseCount"/>.
+    /// The join <see cref="InviteToken.UseCount"/> is NOT affected.
     /// Returns true and sets role/user on success.
     /// </summary>
     internal static bool TryBearerAuth(
@@ -120,9 +121,8 @@ internal static class AdminAuth
         var tokenId = authHeader[7..].Trim();
         if (string.IsNullOrEmpty(tokenId)) return false;
 
-        if (!inviteStore.TryGet(tokenId, out var invite)) return false;
-        if (!invite!.IsActive) return false;
-        if (invite.ExpiresAt.HasValue && invite.ExpiresAt.Value < DateTimeOffset.UtcNow) return false;
+        var invite = inviteStore.TryBearerAuthenticate(tokenId);
+        if (invite is null) return false;
 
         role = invite.Role;
         user = $"invite:{invite.FriendlyName}";

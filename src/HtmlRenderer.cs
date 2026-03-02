@@ -617,6 +617,22 @@ nav a{font-size:.82rem;color:#aaa;white-space:nowrap}
           <option value="2592000">30 days</option>
         </select>
       </label>
+      <label class="form-lbl">Max join uses (browser link)
+        <select id="sel-join-max" class="form-inp">
+          <option value="" selected>Unlimited</option>
+          <option value="1">1</option>
+          <option value="5">5</option>
+          <option value="10">10</option>
+        </select>
+      </label>
+      <label class="form-lbl">Max API uses (Bearer token)
+        <select id="sel-bearer-max" class="form-inp">
+          <option value="" selected>Unlimited</option>
+          <option value="1">1</option>
+          <option value="10">10</option>
+          <option value="100">100</option>
+        </select>
+      </label>
       <div id="create-err" style="color:#f66;font-size:.82rem;min-height:1.2em"></div>
       <div id="link-result" hidden style="margin-top:.75rem">
         <div style="font-size:.82rem;color:#888;margin-bottom:.35rem">Browser join link:</div>
@@ -651,6 +667,8 @@ function openModal() {
   document.getElementById('link-result').hidden = true;
   document.getElementById('create-err').textContent = '';
   document.getElementById('inp-name').value = '';
+  document.getElementById('sel-join-max').value = '';
+  document.getElementById('sel-bearer-max').value = '';
   const btn = document.getElementById('btn-create');
   btn.disabled = false; btn.textContent = 'Create';
   document.getElementById('inp-name').focus();
@@ -662,13 +680,17 @@ function closeModal() {
 }
 
 async function createInvite() {
-  const name   = document.getElementById('inp-name').value.trim();
-  const role   = document.getElementById('sel-role').value;
-  const expiry = document.getElementById('sel-expiry').value;
+  const name      = document.getElementById('inp-name').value.trim();
+  const role      = document.getElementById('sel-role').value;
+  const expiry    = document.getElementById('sel-expiry').value;
+  const joinMax   = document.getElementById('sel-join-max').value;
+  const bearerMax = document.getElementById('sel-bearer-max').value;
   document.getElementById('create-err').textContent = '';
   if (!name) { document.getElementById('create-err').textContent = 'Name is required.'; return; }
   const body = { friendlyName: name, role };
-  if (expiry) body.expiresAt = new Date(Date.now() + parseInt(expiry) * 1000).toISOString();
+  if (expiry)    body.expiresAt      = new Date(Date.now() + parseInt(expiry) * 1000).toISOString();
+  if (joinMax)   body.joinMaxUses    = parseInt(joinMax);
+  if (bearerMax) body.bearerMaxUses  = parseInt(bearerMax);
   const btn = document.getElementById('btn-create');
   btn.disabled = true; btn.textContent = 'Creating\u2026';
   try {
@@ -815,12 +837,27 @@ initExpiryCountdowns();
                 ? $"<button class=\"act-btn\" title=\"Revoke invite\" onclick=\"revokeInvite('{idAttr}')\">🚫</button>"
                 : "<span style=\"font-size:.78rem;color:#555\">revoked</span>";
 
+            // Uses cell: show "X / N" when a cap is set, plain "X" otherwise.
+            // Bearer line only shown when a cap is set or the counter is non-zero.
+            var joinLine = t.JoinMaxUses.HasValue
+                ? $"join: {t.UseCount}&thinsp;/&thinsp;{t.JoinMaxUses}"
+                : $"{t.UseCount}";
+            var showBearer = t.BearerMaxUses.HasValue || t.BearerUseCount > 0;
+            var bearerLine = showBearer
+                ? (t.BearerMaxUses.HasValue
+                    ? $"api: {t.BearerUseCount}&thinsp;/&thinsp;{t.BearerMaxUses}"
+                    : $"api: {t.BearerUseCount}")
+                : "";
+            var usesTd = showBearer
+                ? $"<td style=\"text-align:right;color:#888;font-size:.82rem\"><div>{joinLine}</div><div style=\"color:#666\">{bearerLine}</div></td>"
+                : $"<td style=\"text-align:right;color:#888\">{joinLine}</td>";
+
             sb.AppendLine($"""
     <tr{rowClass}>
       <td>{name}</td>
       <td><span class="{roleClass}">{HttpUtility.HtmlEncode(t.Role)}</span></td>
       {expiryTd}
-      <td style="text-align:right;color:#888">{t.UseCount}</td>
+      {usesTd}
       <td class="actions">{copyBtn}{bearerBtn}{revokeBtn}</td>
     </tr>
 """);

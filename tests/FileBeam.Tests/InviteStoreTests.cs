@@ -159,6 +159,68 @@ public sealed class InviteStoreTests
         Assert.False(store.Edit("missing", null, null, null));
     }
 
+    // ── Create — max uses ──────────────────────────────────────────────────────
+
+    [Fact]
+    public void Create_WithJoinMaxUses_StoresCorrectly()
+    {
+        var store = new InviteStore();
+        var token = store.Create("Alice", "rw", null, "admin", joinMaxUses: 3);
+        Assert.Equal(3, token.JoinMaxUses);
+        Assert.Null(token.BearerMaxUses);
+    }
+
+    [Fact]
+    public void Create_WithBearerMaxUses_StoresCorrectly()
+    {
+        var store = new InviteStore();
+        var token = store.Create("Alice", "rw", null, "admin", bearerMaxUses: 10);
+        Assert.Null(token.JoinMaxUses);
+        Assert.Equal(10, token.BearerMaxUses);
+    }
+
+    // ── Edit — max uses ────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Edit_SetsJoinMaxUses()
+    {
+        var store = new InviteStore();
+        var token = store.Create("Alice", "rw", null, "admin");
+        store.Edit(token.Id, null, null, null, joinMaxUses: 5);
+        store.TryGet(token.Id, out var updated);
+        Assert.Equal(5, updated!.JoinMaxUses);
+    }
+
+    [Fact]
+    public void Edit_ClearsJoinMaxUses()
+    {
+        var store = new InviteStore();
+        var token = store.Create("Alice", "rw", null, "admin", joinMaxUses: 5);
+        store.Edit(token.Id, null, null, null, clearJoinMaxUses: true);
+        store.TryGet(token.Id, out var updated);
+        Assert.Null(updated!.JoinMaxUses);
+    }
+
+    [Fact]
+    public void Edit_SetsBearerMaxUses()
+    {
+        var store = new InviteStore();
+        var token = store.Create("Alice", "rw", null, "admin");
+        store.Edit(token.Id, null, null, null, bearerMaxUses: 20);
+        store.TryGet(token.Id, out var updated);
+        Assert.Equal(20, updated!.BearerMaxUses);
+    }
+
+    [Fact]
+    public void Edit_ClearsBearerMaxUses()
+    {
+        var store = new InviteStore();
+        var token = store.Create("Alice", "rw", null, "admin", bearerMaxUses: 20);
+        store.Edit(token.Id, null, null, null, clearBearerMaxUses: true);
+        store.TryGet(token.Id, out var updated);
+        Assert.Null(updated!.BearerMaxUses);
+    }
+
     // ── TryRedeem ──────────────────────────────────────────────────────────────
 
     [Fact]
@@ -216,6 +278,130 @@ public sealed class InviteStoreTests
         Assert.NotNull(store.TryRedeem(token.Id));
     }
 
+    // ── TryRedeem — join cap ───────────────────────────────────────────────────
+
+    [Fact]
+    public void TryRedeem_BelowJoinCap_Succeeds()
+    {
+        var store = new InviteStore();
+        var token = store.Create("Alice", "rw", null, "admin", joinMaxUses: 3);
+        Assert.NotNull(store.TryRedeem(token.Id));
+        Assert.NotNull(store.TryRedeem(token.Id));
+    }
+
+    [Fact]
+    public void TryRedeem_AtJoinCap_ReturnsNull()
+    {
+        var store = new InviteStore();
+        var token = store.Create("Alice", "rw", null, "admin", joinMaxUses: 2);
+        store.TryRedeem(token.Id);
+        store.TryRedeem(token.Id); // reaches cap, auto-deactivates
+        Assert.Null(store.TryRedeem(token.Id));
+    }
+
+    [Fact]
+    public void TryRedeem_LastValidRedeem_AutoDeactivates()
+    {
+        var store  = new InviteStore();
+        var token  = store.Create("Alice", "rw", null, "admin", joinMaxUses: 1);
+        var result = store.TryRedeem(token.Id);
+        Assert.NotNull(result);
+        Assert.Equal(1, result!.UseCount);
+        Assert.False(result.IsActive);
+    }
+
+    [Fact]
+    public void TryRedeem_NoCap_NeverDeactivates()
+    {
+        var store = new InviteStore();
+        var token = store.Create("Alice", "rw", null, "admin");
+        for (int i = 0; i < 10; i++)
+            store.TryRedeem(token.Id);
+        store.TryGet(token.Id, out var updated);
+        Assert.True(updated!.IsActive);
+        Assert.Equal(10, updated.UseCount);
+    }
+
+    // ── TryBearerAuthenticate ──────────────────────────────────────────────────
+
+    [Fact]
+    public void TryBearerAuthenticate_ValidToken_ReturnsTokenAndIncrementsBearerCount()
+    {
+        var store  = new InviteStore();
+        var token  = store.Create("Alice", "rw", null, "admin");
+        var result = store.TryBearerAuthenticate(token.Id);
+        Assert.NotNull(result);
+        Assert.Equal(1, result!.BearerUseCount);
+        Assert.Equal(0, result.UseCount); // join count untouched
+    }
+
+    [Fact]
+    public void TryBearerAuthenticate_MultipleCalls_IncrementsCorrectly()
+    {
+        var store = new InviteStore();
+        var token = store.Create("Alice", "rw", null, "admin");
+        store.TryBearerAuthenticate(token.Id);
+        store.TryBearerAuthenticate(token.Id);
+        var result = store.TryBearerAuthenticate(token.Id);
+        Assert.Equal(3, result!.BearerUseCount);
+    }
+
+    [Fact]
+    public void TryBearerAuthenticate_DoesNotIncrementJoinUseCount()
+    {
+        var store = new InviteStore();
+        var token = store.Create("Alice", "rw", null, "admin");
+        store.TryBearerAuthenticate(token.Id);
+        store.TryBearerAuthenticate(token.Id);
+        store.TryGet(token.Id, out var updated);
+        Assert.Equal(0, updated!.UseCount);
+    }
+
+    [Fact]
+    public void TryBearerAuthenticate_AtBearerCap_ReturnsNull()
+    {
+        var store = new InviteStore();
+        var token = store.Create("Alice", "rw", null, "admin", bearerMaxUses: 2);
+        store.TryBearerAuthenticate(token.Id);
+        store.TryBearerAuthenticate(token.Id); // reaches cap
+        Assert.Null(store.TryBearerAuthenticate(token.Id));
+    }
+
+    [Fact]
+    public void TryBearerAuthenticate_BearerCapReached_DoesNotDeactivate()
+    {
+        var store = new InviteStore();
+        var token = store.Create("Alice", "rw", null, "admin", bearerMaxUses: 1);
+        store.TryBearerAuthenticate(token.Id); // reaches cap
+        store.TryGet(token.Id, out var updated);
+        Assert.True(updated!.IsActive); // invite stays active for join
+    }
+
+    [Fact]
+    public void TryBearerAuthenticate_InactiveToken_ReturnsNull()
+    {
+        var store = new InviteStore();
+        var token = store.Create("Alice", "rw", null, "admin");
+        store.Revoke(token.Id);
+        Assert.Null(store.TryBearerAuthenticate(token.Id));
+    }
+
+    [Fact]
+    public void TryBearerAuthenticate_ExpiredToken_ReturnsNull()
+    {
+        var store  = new InviteStore();
+        var expiry = DateTimeOffset.UtcNow.AddSeconds(-1);
+        var token  = store.Create("Alice", "rw", expiry, "admin");
+        Assert.Null(store.TryBearerAuthenticate(token.Id));
+    }
+
+    [Fact]
+    public void TryBearerAuthenticate_MissingToken_ReturnsNull()
+    {
+        var store = new InviteStore();
+        Assert.Null(store.TryBearerAuthenticate("doesnotexist"));
+    }
+
     // ── Persistence ────────────────────────────────────────────────────────────
 
     [Fact]
@@ -257,6 +443,42 @@ public sealed class InviteStoreTests
             var store2 = new InviteStore(path);
             store2.TryGet(token.Id, out var loaded);
             Assert.False(loaded!.IsActive);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Persistence_MaxUsesFieldsRoundTrip()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            var store1 = new InviteStore(path);
+            store1.Create("Alice", "rw", null, "admin", joinMaxUses: 3, bearerMaxUses: 50);
+
+            var store2 = new InviteStore(path);
+            var loaded = store2.GetAll()[0];
+            Assert.Equal(3,  loaded.JoinMaxUses);
+            Assert.Equal(50, loaded.BearerMaxUses);
+            Assert.Equal(0,  loaded.BearerUseCount);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Persistence_BearerUseCountRoundTrips()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            var store1 = new InviteStore(path);
+            var token  = store1.Create("Bob", "rw", null, "admin");
+            store1.TryBearerAuthenticate(token.Id);
+            store1.TryBearerAuthenticate(token.Id);
+
+            var store2 = new InviteStore(path);
+            store2.TryGet(token.Id, out var loaded);
+            Assert.Equal(2, loaded!.BearerUseCount);
         }
         finally { File.Delete(path); }
     }

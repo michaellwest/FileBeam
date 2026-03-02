@@ -181,15 +181,22 @@ The **Expires** column shows a live relative countdown that updates every 10 sec
 
 **Create body** (`Content-Type: application/json`, `X-CSRF-Token: <token>`):
 ```json
-{ "friendlyName": "Alice", "role": "rw", "expiresAt": "2026-12-31T23:59:59Z" }
+{ "friendlyName": "Alice", "role": "rw", "expiresAt": "2026-12-31T23:59:59Z", "joinMaxUses": 1, "bearerMaxUses": 100 }
 ```
-`role` defaults to `"rw"` if omitted. `expiresAt` is optional (omit for a non-expiring invite).
+`role` defaults to `"rw"` if omitted. `expiresAt`, `joinMaxUses`, and `bearerMaxUses` are optional (omit for unlimited).
 
 **Edit body** (`PATCH`):
 ```json
-{ "friendlyName": "Alice 2", "role": "ro", "clearExpiry": true }
+{ "friendlyName": "Alice 2", "role": "ro", "clearExpiry": true, "joinMaxUses": 5, "clearBearerMaxUses": true }
 ```
-Any field may be omitted to leave it unchanged. Set `clearExpiry: true` to remove the expiry.
+Any field may be omitted to leave it unchanged. Set `clearExpiry: true`, `clearJoinMaxUses: true`, or `clearBearerMaxUses: true` to remove a cap.
+
+**Use caps:** each invite tracks browser joins and Bearer API calls independently.
+
+- `joinMaxUses` — caps how many times `/join/{id}` can be redeemed (browser only). When the cap is reached the invite **auto-deactivates** (`IsActive = false`), which also stops Bearer access.
+- `bearerMaxUses` — caps how many times the Bearer token can authenticate per request. When the cap is reached the Bearer token is rejected, but the join link and any existing browser sessions are **not** affected — the invite stays active for join purposes unless `joinMaxUses` is also hit.
+
+The **Uses** column in the admin UI shows `join: X / N` and `api: X / N` when caps are set, or a plain number when unlimited. The New Invite modal includes quick-select dropdowns for both caps (Unlimited / 1 / 5 / 10 for join; Unlimited / 1 / 10 / 100 for Bearer).
 
 **Persistence:** if `--invites-file` is set, tokens are saved to a JSON file automatically on create, revoke, or edit, and reloaded at startup. Without the flag, tokens are in-memory only and lost on restart.
 

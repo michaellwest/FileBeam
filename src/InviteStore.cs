@@ -16,7 +16,10 @@ public sealed record InviteToken(
     int             UseCount,
     string          CreatedBy,
     bool            IsActive,
-    DateTimeOffset  CreatedAt);
+    DateTimeOffset  CreatedAt,
+    int?            JoinMaxUses    = null,
+    int?            BearerMaxUses  = null,
+    int             BearerUseCount = 0);
 
 /// <summary>
 /// In-memory invite token store with optional JSON file persistence.
@@ -46,17 +49,21 @@ public sealed class InviteStore
     /// <summary>
     /// Creates a new invite token and persists it if a file path is configured.
     /// </summary>
-    public InviteToken Create(string friendlyName, string role, DateTimeOffset? expiresAt, string createdBy)
+    public InviteToken Create(string friendlyName, string role, DateTimeOffset? expiresAt, string createdBy,
+        int? joinMaxUses = null, int? bearerMaxUses = null)
     {
         var token = new InviteToken(
-            Id:           GenerateId(),
-            FriendlyName: friendlyName,
-            Role:         role,
-            ExpiresAt:    expiresAt,
-            UseCount:     0,
-            CreatedBy:    createdBy,
-            IsActive:     true,
-            CreatedAt:    DateTimeOffset.UtcNow);
+            Id:             GenerateId(),
+            FriendlyName:   friendlyName,
+            Role:           role,
+            ExpiresAt:      expiresAt,
+            UseCount:       0,
+            CreatedBy:      createdBy,
+            IsActive:       true,
+            CreatedAt:      DateTimeOffset.UtcNow,
+            JoinMaxUses:    joinMaxUses,
+            BearerMaxUses:  bearerMaxUses,
+            BearerUseCount: 0);
 
         _tokens[token.Id] = token;
         SaveIfConfigured();
@@ -83,18 +90,23 @@ public sealed class InviteStore
     }
 
     /// <summary>
-    /// Updates a token's friendly name, role, and/or expiry.
+    /// Updates a token's friendly name, role, expiry, and/or use caps.
     /// Pass <c>clearExpiry = true</c> to remove the expiry entirely.
+    /// Pass <c>clearJoinMaxUses = true</c> or <c>clearBearerMaxUses = true</c> to remove a cap.
     /// Returns false if the token does not exist.
     /// </summary>
-    public bool Edit(string id, string? friendlyName, string? role, DateTimeOffset? expiresAt, bool clearExpiry = false)
+    public bool Edit(string id, string? friendlyName, string? role, DateTimeOffset? expiresAt,
+        bool clearExpiry = false, int? joinMaxUses = null, int? bearerMaxUses = null,
+        bool clearJoinMaxUses = false, bool clearBearerMaxUses = false)
     {
         if (!_tokens.TryGetValue(id, out var t)) return false;
         _tokens[id] = t with
         {
-            FriendlyName = friendlyName ?? t.FriendlyName,
-            Role         = role         ?? t.Role,
-            ExpiresAt    = clearExpiry  ? null : (expiresAt ?? t.ExpiresAt),
+            FriendlyName  = friendlyName       ?? t.FriendlyName,
+            Role          = role               ?? t.Role,
+            ExpiresAt     = clearExpiry        ? null : (expiresAt    ?? t.ExpiresAt),
+            JoinMaxUses   = clearJoinMaxUses   ? null : (joinMaxUses   ?? t.JoinMaxUses),
+            BearerMaxUses = clearBearerMaxUses ? null : (bearerMaxUses ?? t.BearerMaxUses),
         };
         SaveIfConfigured();
         return true;
@@ -103,20 +115,54 @@ public sealed class InviteStore
     /// <summary>
     /// Validates that the token is active and not expired, atomically increments
     /// <see cref="InviteToken.UseCount"/>, and returns the updated token.
-    /// Returns <c>null</c> if the token is missing, inactive, or expired.
+    /// Returns <c>null</c> if the token is missing, inactive, expired, or has reached its join cap.
+    /// Auto-deactivates the invite when the join cap is reached.
     /// </summary>
     public InviteToken? TryRedeem(string id)
     {
         if (!_tokens.TryGetValue(id, out var t)) return null;
         if (!t.IsActive) return null;
         if (t.ExpiresAt.HasValue && t.ExpiresAt.Value < DateTimeOffset.UtcNow) return null;
+        if (t.JoinMaxUses.HasValue && t.UseCount >= t.JoinMaxUses.Value) return null;
 
-        // Atomic compare-and-swap increment
+        // Atomic compare-and-swap increment; auto-deactivate when cap is reached
         InviteToken current, updated;
         do
         {
             current = _tokens[id];
-            updated = current with { UseCount = current.UseCount + 1 };
+            var newCount   = current.UseCount + 1;
+            var capReached = current.JoinMaxUses.HasValue && newCount >= current.JoinMaxUses.Value;
+            updated = current with
+            {
+                UseCount = newCount,
+                IsActive = capReached ? false : current.IsActive,
+            };
+        }
+        while (!_tokens.TryUpdate(id, updated, current));
+
+        SaveIfConfigured();
+        return updated;
+    }
+
+    /// <summary>
+    /// Validates the token for Bearer API access, atomically increments
+    /// <see cref="InviteToken.BearerUseCount"/>, and returns the updated token.
+    /// Returns <c>null</c> if the token is missing, inactive, expired, or has reached its Bearer cap.
+    /// Does NOT auto-deactivate — the join link remains unaffected when the Bearer cap is reached.
+    /// </summary>
+    public InviteToken? TryBearerAuthenticate(string id)
+    {
+        if (!_tokens.TryGetValue(id, out var t)) return null;
+        if (!t.IsActive) return null;
+        if (t.ExpiresAt.HasValue && t.ExpiresAt.Value < DateTimeOffset.UtcNow) return null;
+        if (t.BearerMaxUses.HasValue && t.BearerUseCount >= t.BearerMaxUses.Value) return null;
+
+        // Atomic compare-and-swap increment; no auto-deactivate for Bearer cap
+        InviteToken current, updated;
+        do
+        {
+            current = _tokens[id];
+            updated = current with { BearerUseCount = current.BearerUseCount + 1 };
         }
         while (!_tokens.TryUpdate(id, updated, current));
 
