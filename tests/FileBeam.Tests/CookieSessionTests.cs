@@ -42,7 +42,7 @@ public sealed class CookieSessionTests
 
         Assert.True(result);
         Assert.Equal("rw", role);
-        Assert.Equal("invite:Alice", user);
+        Assert.Equal($"invite:{invite.Id}", user);
     }
 
     [Fact]

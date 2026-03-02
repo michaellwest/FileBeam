@@ -1275,7 +1275,7 @@ public class RouteHandlers(
                 if (invite.ExpiresAt.HasValue && invite.ExpiresAt.Value < DateTimeOffset.UtcNow) return false;
 
                 role = invite.Role;           // use live role — may have been edited since issue
-                user = $"invite:{invite.FriendlyName}";
+                user = $"invite:{invite.Id}";
             }
             else
             {
