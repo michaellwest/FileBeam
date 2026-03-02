@@ -217,6 +217,18 @@ The underlying data is also available as a plain JSON API endpoint:
 | ------ | --------------- | --------------------------------------------------------------- |
 | `GET`  | `/admin/config` | Returns effective resolved config as JSON (admin role required) |
 
+#### Audit log viewer
+
+When `--audit-log` is configured with a file path (not `-`/stdout), an **Audit Log** link appears in the admin navigation bar. It opens `GET /admin/audit`, a read-only HTML page showing the last 200 log entries in reverse-chronological order (most recent first). The page auto-refreshes every 30 seconds.
+
+| Method | Endpoint       | Description                                                        |
+| ------ | -------------- | ------------------------------------------------------------------ |
+| `GET`  | `/admin/audit` | Last 200 audit entries as HTML table (admin only; 404 if no file)  |
+
+**Columns:** Timestamp · Action · User · File · Bytes · IP · Status
+
+The page returns `404 Not Found` when `--audit-log` is absent or set to `-` (stdout mode). Malformed or unparseable log lines are silently skipped.
+
 #### Per-sender upload folders
 
 When `--per-sender` is set, each uploader's files land in their own subfolder inside the upload directory:

@@ -3,6 +3,15 @@ using System.Web;
 
 namespace FileBeam;
 
+public record AuditEntry(
+    string  Timestamp,
+    string? Username,
+    string  RemoteIp,
+    string  Action,
+    string  Path,
+    long    Bytes,
+    int     StatusCode);
+
 public static class HtmlRenderer
 {
     public static string RenderDirectory(
@@ -65,7 +74,7 @@ public static class HtmlRenderer
     /// Pass <paramref name="showHome"/> = true when rendering an alternate view (my-uploads, admin/uploads)
     /// so users can navigate back to the main file listing.
     /// </summary>
-    public static string BuildNavLinks(string role, bool perSender, bool separateUploadDir, bool showHome = false, bool isReadOnly = false, bool hasInvites = false, bool hasConfig = false)
+    public static string BuildNavLinks(string role, bool perSender, bool separateUploadDir, bool showHome = false, bool isReadOnly = false, bool hasInvites = false, bool hasConfig = false, bool hasAuditLog = false)
     {
         const string sep  = """<span style="color:#444">·</span>""";
         const string style = "font-size:0.82rem;color:#aaa;white-space:nowrap";
@@ -100,6 +109,11 @@ public static class HtmlRenderer
         {
             if (sb.Length > 0) sb.Append(sep);
             sb.Append($"""<a href="#" style="{style}" onclick="openConfigModal();return false;">Config</a>""");
+        }
+        if (role == "admin" && hasAuditLog)
+        {
+            if (sb.Length > 0) sb.Append(sep);
+            sb.Append($"""<a href="/admin/audit" style="{style}">Audit&nbsp;Log</a>""");
         }
         return sb.ToString();
     }
@@ -864,6 +878,114 @@ initExpiryCountdowns();
         }
 
         sb.Append("</tbody></table>\n");
+        return sb.ToString();
+    }
+
+    // ── Admin Audit Log page ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Renders the full admin audit log page. Entries are shown most-recent-first.
+    /// The page includes a 30-second auto-refresh meta tag.
+    /// </summary>
+    public static string RenderAuditLog(IReadOnlyList<AuditEntry> entries, string navLinks = "")
+    {
+        var sb = new StringBuilder();
+
+        sb.Append("<!DOCTYPE html><html lang=\"en\"><head>\n");
+        sb.Append("<meta charset=\"UTF-8\">\n");
+        sb.Append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n");
+        sb.Append("<meta http-equiv=\"refresh\" content=\"30\">\n");
+        sb.Append("<title>FileBeam \u2014 Audit Log</title>\n");
+        sb.Append("""
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f1117;color:#e0e0e0;min-height:100vh;padding:2rem}
+a{color:#5ba4f5;text-decoration:none}a:hover{text-decoration:underline}
+header{display:flex;align-items:center;gap:1rem;margin-bottom:1.75rem}
+header h1{font-size:1.4rem;font-weight:700;color:#5ba4f5}
+.section{background:#1a1d27;border-radius:8px;padding:1.25rem 1.5rem;margin-bottom:1.5rem}
+.section-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem}
+.section-hdr h2{font-size:1rem;font-weight:600;color:#aaa;text-transform:uppercase;letter-spacing:.05em}
+.section-meta{font-size:.78rem;color:#555}
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:700px}
+thead tr{background:#222536}
+th{text-align:left;padding:.6rem .85rem;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:#888;font-weight:600;white-space:nowrap}
+td{padding:.55rem .85rem;font-size:.85rem;border-top:1px solid #252836;vertical-align:top}
+tr:hover td{background:#20233a}
+.empty-msg{color:#555;padding:1.5rem 0;text-align:center;font-size:.9rem}
+.action-badge{display:inline-block;padding:.1rem .45rem;border-radius:3px;font-size:.78rem;font-weight:600;font-family:monospace}
+.action-download{background:#1a2535;color:#5ba4f5}
+.action-upload{background:#1a2a1a;color:#4ade80}
+.action-delete{background:#2a1a1a;color:#f87171}
+.action-other{background:#252836;color:#888}
+nav a{font-size:.82rem;color:#aaa;white-space:nowrap}
+</style>
+</head>
+""");
+
+        sb.Append("<body>\n");
+        sb.Append("<header>\n");
+        sb.Append("  <h1>\u26a1 FileBeam</h1>\n");
+        sb.Append($"  <nav style=\"display:flex;align-items:center;gap:.75rem;margin-left:1rem\">{navLinks}</nav>\n");
+        sb.Append("</header>\n");
+
+        sb.Append("<div class=\"section\">\n");
+        sb.Append("<div class=\"section-hdr\">");
+        sb.Append($"<h2>Audit Log</h2>");
+        sb.Append($"<span class=\"section-meta\">{entries.Count} entries shown &middot; refreshes every 30s</span>");
+        sb.Append("</div>\n");
+
+        if (entries.Count == 0)
+        {
+            sb.Append("<p class=\"empty-msg\">No audit entries found.</p>\n");
+        }
+        else
+        {
+            sb.Append("<div class=\"tbl-wrap\">\n");
+            sb.Append("<table>\n");
+            sb.Append("<thead><tr><th>Timestamp</th><th>Action</th><th>User</th><th>File</th><th>Bytes</th><th>IP</th><th>Status</th></tr></thead>\n");
+            sb.Append("<tbody>\n");
+
+            foreach (var e in entries.Reverse())
+            {
+                var ts         = HttpUtility.HtmlEncode(e.Timestamp);
+                var action     = HttpUtility.HtmlEncode(e.Action);
+                var actionCls  = e.Action switch
+                {
+                    "download" => "action-download",
+                    "upload"   => "action-upload",
+                    "delete"   => "action-delete",
+                    _          => "action-other"
+                };
+                var user       = HttpUtility.HtmlEncode(e.Username ?? "\u2014");
+                var path       = HttpUtility.HtmlEncode(e.Path);
+                var bytes      = e.Bytes > 0 ? FormatSize(e.Bytes) : "\u2014";
+                var ip         = HttpUtility.HtmlEncode(e.RemoteIp);
+                var statusColor = e.StatusCode >= 500 ? "#f87171"
+                                : e.StatusCode >= 400 ? "#fbbf24"
+                                : e.StatusCode >= 200 ? "#4ade80"
+                                : "#888";
+
+                sb.AppendLine($"""
+    <tr>
+      <td style="color:#888;font-size:.78rem;white-space:nowrap">{ts}</td>
+      <td><span class="action-badge {actionCls}">{action}</span></td>
+      <td style="color:#aaa">{user}</td>
+      <td style="font-family:monospace;font-size:.78rem;word-break:break-all">{path}</td>
+      <td style="text-align:right;color:#888;white-space:nowrap">{bytes}</td>
+      <td style="color:#888;font-size:.82rem;white-space:nowrap">{ip}</td>
+      <td style="color:{statusColor};text-align:center">{e.StatusCode}</td>
+    </tr>
+""");
+            }
+
+            sb.Append("</tbody>\n</table>\n</div>\n");
+        }
+
+        sb.Append("</div>\n");
+        sb.Append("</body></html>\n");
+
         return sb.ToString();
     }
 

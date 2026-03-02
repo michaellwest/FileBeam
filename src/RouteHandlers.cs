@@ -98,7 +98,8 @@ public class RouteHandlers(
     bool isTls = false,
     Action<string, string>? debugLog = null,
     string configJson = "",
-    string cliCommand = "")
+    string cliCommand = "",
+    string? auditLogPath = null)
 {
     // Tracks cumulative bytes uploaded per sender key (IP or username).
     // Best-effort only — not atomic across concurrent uploads from the same sender.
@@ -110,6 +111,8 @@ public class RouteHandlers(
 
     // In-memory share token store: token → (resolved file path, expiry, creator username).
     private readonly ConcurrentDictionary<string, (string FilePath, DateTimeOffset Expiry, string Creator)> _shareTokens = new();
+
+    private bool HasAuditLog => !string.IsNullOrEmpty(auditLogPath) && auditLogPath != "-";
 
     private string SafeResolvePath(string? subpath)
     {
@@ -294,7 +297,7 @@ public class RouteHandlers(
 
         bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
         bool hasConfig = role == "admin" && configJson.Length > 0;
-        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, isReadOnly: isReadOnly, hasInvites: inviteStore is not null, hasConfig: hasConfig);
+        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, isReadOnly: isReadOnly, hasInvites: inviteStore is not null, hasConfig: hasConfig, hasAuditLog: HasAuditLog);
         var adminModal = hasConfig ? HtmlRenderer.BuildAdminConfigModal(configJson, cliCommand) : "";
         var html = HtmlRenderer.RenderDirectory(relPath, dirs.ToList(), files.ToList(), isReadOnly, csrfToken, sort, order, role,
             separateUploadDir: separateDir, navLinks: navLinks, perSender: perSender, adminConfigModal: adminModal);
@@ -940,6 +943,56 @@ public class RouteHandlers(
         return Results.Content(configJson, "application/json");
     }
 
+    // GET /admin/audit  — last 200 audit log entries rendered as HTML (admin only)
+    // Returns 404 when no audit log file is configured (or when writing to stdout).
+    public IResult GetAuditLog(HttpContext ctx)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (!HasAuditLog)
+            return Results.NotFound();
+
+        List<AuditEntry> entries;
+        if (!File.Exists(auditLogPath))
+        {
+            entries = [];
+        }
+        else
+        {
+            entries = File.ReadLines(auditLogPath!)
+                .TakeLast(200)
+                .Select(TryParseAuditEntry)
+                .OfType<AuditEntry>()
+                .ToList();
+        }
+
+        bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
+        var navLinks = HtmlRenderer.BuildNavLinks("admin", perSender, separateDir, showHome: true,
+            hasInvites: inviteStore is not null, hasAuditLog: true);
+        return Results.Content(HtmlRenderer.RenderAuditLog(entries, navLinks), "text/html");
+    }
+
+    private static AuditEntry? TryParseAuditEntry(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            return new AuditEntry(
+                Timestamp:  root.TryGetProperty("timestamp",   out var ts) ? ts.GetString()  ?? "" : "",
+                Username:   root.TryGetProperty("username",    out var un) ? un.GetString()       : null,
+                RemoteIp:   root.TryGetProperty("remote_ip",  out var ip) ? ip.GetString()  ?? "" : "",
+                Action:     root.TryGetProperty("action",     out var ac) ? ac.GetString()  ?? "" : "",
+                Path:       root.TryGetProperty("path",       out var p)  ? p.GetString()   ?? "" : "",
+                Bytes:      root.TryGetProperty("bytes",      out var b)  ? b.GetInt64()         : 0,
+                StatusCode: root.TryGetProperty("status_code", out var sc) ? sc.GetInt32()        : 0
+            );
+        }
+        catch { return null; }
+    }
+
     // GET /admin/shares  — list all live share tokens with creator (admin only)
     public IResult ListShareTokens(HttpContext ctx)
     {
@@ -1081,7 +1134,7 @@ public class RouteHandlers(
 
         var baseUrl      = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
         bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
-        var navLinks     = HtmlRenderer.BuildNavLinks("admin", perSender, separateDir, showHome: true, hasInvites: true);
+        var navLinks     = HtmlRenderer.BuildNavLinks("admin", perSender, separateDir, showHome: true, hasInvites: true, hasAuditLog: HasAuditLog);
         var html         = HtmlRenderer.RenderInvitesAdmin(inviteStore.GetAll(), csrfToken, baseUrl, navLinks);
         return Results.Content(html, "text/html");
     }
@@ -1904,7 +1957,7 @@ public class RouteHandlers(
         };
 
         bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
-        var navLinks = HtmlRenderer.BuildNavLinks("admin", perSender, separateDir, showHome: true, hasInvites: inviteStore is not null);
+        var navLinks = HtmlRenderer.BuildNavLinks("admin", perSender, separateDir, showHome: true, hasInvites: inviteStore is not null, hasAuditLog: HasAuditLog);
         var html = HtmlRenderer.RenderDirectory(
             relPath, dirs.ToList(), files.ToList(),
             isReadOnly: true,

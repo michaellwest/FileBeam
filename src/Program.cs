@@ -482,7 +482,8 @@ var handlers = new RouteHandlers(
     isTls:                  tlsCertificate is not null,
     debugLog:               debugLog,
     configJson:             configJson,
-    cliCommand:             cliCommand);
+    cliCommand:             cliCommand,
+    auditLogPath:           auditLogPath);
 
 // ── Console request log (with elapsed time) ──────────────────────────────────
 // Must be registered before route mappings so it wraps endpoint execution.
@@ -770,6 +771,9 @@ app.MapPost("/admin/unrevoke/ip/{ip}",      handlers.UnrevokeIp);
 
 // ── Admin: config export ───────────────────────────────────────────────────────
 app.MapGet("/admin/config",                 handlers.GetAdminConfig);
+
+// ── Admin: audit log viewer ────────────────────────────────────────────────────
+app.MapGet("/admin/audit",                  handlers.GetAuditLog);
 
 // ── Admin: invite management ───────────────────────────────────────────────────
 app.MapPost("/admin/invites",               (Delegate)handlers.CreateInvite);
