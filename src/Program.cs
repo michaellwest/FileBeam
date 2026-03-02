@@ -16,8 +16,10 @@ string? cliUploadDir        = null;
 string? cliPassword         = null;
 string? cliCredentialsFile  = null;
 int?    cliPort             = null;
-bool    readOnly            = false;
-bool    perSender           = false;
+bool?   cliReadOnly         = null;
+bool?   cliPerSender        = null;
+string? cliConfigFile       = null;
+bool    printConfig         = false;
 long    maxFileSize         = 0;   // bytes; 0 = unlimited
 long    maxUploadBytes      = 0;   // per-sender cumulative bytes; 0 = unlimited
 long    maxUploadTotal      = 0;   // total upload directory cap; 0 = unlimited
@@ -43,9 +45,9 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--credentials-file"                    && i + 1 < args.Length)
         cliCredentialsFile = args[++i];
     else if (args[i] == "--readonly"     || args[i] == "-r")
-        readOnly = true;
+        cliReadOnly = true;
     else if (args[i] == "--per-sender")
-        perSender = true;
+        cliPerSender = true;
     else if (args[i] == "--max-file-size"  && i + 1 < args.Length)
         maxFileSize = long.TryParse(args[++i], out var mf) ? mf : 0;
     else if (args[i] == "--max-upload-bytes" && i + 1 < args.Length)
@@ -95,7 +97,62 @@ for (int i = 0; i < args.Length; i++)
         rateLimit = int.TryParse(args[++i], out var rl) ? rl : 60;
     else if (args[i] == "--log-level"   && i + 1 < args.Length)
         logLevel = args[++i].ToLowerInvariant();
+    else if (args[i] == "--config"          && i + 1 < args.Length)
+        cliConfigFile = args[++i];
+    else if (args[i] == "--print-config")
+        printConfig = true;
 }
+
+// ── Load config file (filebeam.json in CWD or --config path) ──────────────────
+{
+    var cwdConfig = Path.Combine(Directory.GetCurrentDirectory(), "filebeam.json");
+    var configPath = cliConfigFile is not null
+        ? Path.GetFullPath(cliConfigFile)
+        : File.Exists(cwdConfig) ? cwdConfig : null;
+
+    if (configPath is not null)
+    {
+        if (!FileBeamConfig.TryLoad(configPath, out var cfg, out var cfgErr))
+        {
+            AnsiConsole.MarkupLine(
+                $"[red]Error:[/] cannot load config file '{Markup.Escape(configPath)}': {Markup.Escape(cfgErr!)}");
+            return 1;
+        }
+
+        // Apply config as defaults — CLI flags (set above) take precedence.
+        // Nullable cli* vars: ??= only assigns when the CLI left the var null.
+        // Value-type vars (maxFileSize etc.): config wins when CLI left them at 0/default.
+        cliDownloadDir    ??= cfg!.Download    is not null ? Path.GetFullPath(cfg.Download) : null;
+        cliUploadDir      ??= cfg!.Upload      is not null ? Path.GetFullPath(cfg.Upload)   : null;
+        cliPort           ??= cfg!.Port;
+        cliCredentialsFile ??= cfg!.CredentialsFile;
+        cliReadOnly       ??= cfg!.ReadOnly;
+        cliPerSender      ??= cfg!.PerSender;
+        cliTlsCert        ??= cfg!.TlsCert;
+        cliTlsKey         ??= cfg!.TlsKey;
+
+        if (maxFileSize == 0    && cfg!.MaxFileSize    is not null
+            && TryParseSize(cfg.MaxFileSize,    out var cfgMF))  maxFileSize    = cfgMF;
+        if (maxUploadBytes == 0 && cfg!.MaxUploadBytes is not null
+            && TryParseSize(cfg.MaxUploadBytes, out var cfgMUB)) maxUploadBytes = cfgMUB;
+        if (maxUploadTotal == 0 && cfg!.MaxUploadTotal is not null
+            && TryParseSize(cfg.MaxUploadTotal, out var cfgMUT)) maxUploadTotal = cfgMUT;
+        if (maxUploadSize is null && cfg!.MaxUploadSize is not null
+            && TryParseSize(cfg.MaxUploadSize,  out var cfgMUS)) maxUploadSize  = cfgMUS;
+        if (shareTtl == 3600    && cfg!.ShareTtl       is not null) shareTtl    = cfg.ShareTtl.Value;
+        if (auditLogMaxSize == 0 && cfg!.AuditLogMaxSize is not null
+            && TryParseSize(cfg.AuditLogMaxSize, out var cfgALS)) auditLogMaxSize = cfgALS;
+        if (rateLimit == 60     && cfg!.RateLimit       is not null) rateLimit   = cfg.RateLimit.Value;
+        if (logLevel == "info"  && cfg!.LogLevel        is not null) logLevel    = cfg.LogLevel.ToLowerInvariant();
+        auditLogPath ??= cfg!.AuditLog;
+
+        AnsiConsole.MarkupLine($"[grey]Config loaded: {Markup.Escape(configPath)}[/]");
+    }
+}
+
+// Resolve bool flags (nullable CLI vars default to false if neither CLI nor config set them)
+bool readOnly  = cliReadOnly  ?? false;
+bool perSender = cliPerSender ?? false;
 
 /// <summary>
 /// Parses a human-readable size string (e.g. "500MB", "2GB", "100KB", "unlimited", "0").
@@ -255,6 +312,31 @@ if (cliTlsCert != null || cliTlsKey != null)
         AnsiConsole.MarkupLine($"[red]Error:[/] failed to load TLS certificate: {Markup.Escape(ex.Message)}");
         return 1;
     }
+}
+
+// ── --print-config: dump effective config as JSON and exit ────────────────────
+if (printConfig)
+{
+    Console.WriteLine(FileBeamConfig.ToDisplayJson(
+        download:       serveDir,
+        upload:         uploadDir,
+        port:           port,
+        credentialsFile: cliCredentialsFile,
+        invitesFile:    null,
+        readOnly:       readOnly,
+        perSender:      perSender,
+        maxFileSize:    maxFileSize,
+        maxUploadBytes: maxUploadBytes,
+        maxUploadTotal: maxUploadTotal,
+        maxUploadSize:  maxUploadSize,
+        tlsCert:        cliTlsCert,
+        tlsKey:         cliTlsKey,
+        shareTtl:       shareTtl,
+        auditLog:       auditLogPath,
+        auditLogMaxSize: auditLogMaxSize,
+        rateLimit:      rateLimit,
+        logLevel:       logLevel));
+    return 0;
 }
 
 // ── Resolve LAN IPs ────────────────────────────────────────────────────────────
