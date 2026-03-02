@@ -17,7 +17,8 @@ public static class HtmlRenderer
         bool separateUploadDir = false,
         string urlBase = "",
         string navLinks = "",
-        bool perSender = false)
+        bool perSender = false,
+        string adminConfigModal = "")
     {
         var segments = relPath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
 
@@ -55,6 +56,7 @@ public static class HtmlRenderer
             .Replace("{{ROWS}}",            BuildRows(segments, dirs, files, isAdmin, urlBase))
             .Replace("{{UPLOAD_SECTION}}", uploadSection)
             .Replace("{{CSRF_TOKEN}}",      HttpUtility.HtmlAttributeEncode(csrfToken))
+            .Replace("{{ADMIN_CONFIG_MODAL}}", adminConfigModal)
             .Replace("{{APP_JS}}",          ResourceLoader.AppJs);
     }
 
@@ -63,7 +65,7 @@ public static class HtmlRenderer
     /// Pass <paramref name="showHome"/> = true when rendering an alternate view (my-uploads, admin/uploads)
     /// so users can navigate back to the main file listing.
     /// </summary>
-    public static string BuildNavLinks(string role, bool perSender, bool separateUploadDir, bool showHome = false, bool isReadOnly = false, bool hasInvites = false)
+    public static string BuildNavLinks(string role, bool perSender, bool separateUploadDir, bool showHome = false, bool isReadOnly = false, bool hasInvites = false, bool hasConfig = false)
     {
         const string sep  = """<span style="color:#444">·</span>""";
         const string style = "font-size:0.82rem;color:#aaa;white-space:nowrap";
@@ -93,6 +95,11 @@ public static class HtmlRenderer
         {
             if (sb.Length > 0) sb.Append(sep);
             sb.Append($"""<a href="/admin/invites" style="{style}">Invites</a>""");
+        }
+        if (role == "admin" && hasConfig)
+        {
+            if (sb.Length > 0) sb.Append(sep);
+            sb.Append($"""<a href="#" style="{style}" onclick="openConfigModal();return false;">Config</a>""");
         }
         return sb.ToString();
     }
@@ -371,6 +378,99 @@ public static class HtmlRenderer
             ? new[] { name }
             : segments.Append(name).ToArray();
         return string.Join("/", parts.Select(Uri.EscapeDataString));
+    }
+
+    // ── Admin Config modal (injected into main browse page for admin users) ───
+
+    /// <summary>
+    /// Builds the HTML for the config export modal: a "Config File" tab (JSON download)
+    /// and a "CLI Command" tab (copyable shell command). Rendered as a hidden dialog injected
+    /// into the main browse page via the {{ADMIN_CONFIG_MODAL}} placeholder.
+    /// </summary>
+    public static string BuildAdminConfigModal(string configJson, string cliCommand)
+    {
+        var jsonEncoded = HttpUtility.HtmlEncode(configJson);
+        var cliEncoded  = HttpUtility.HtmlEncode(cliCommand);
+
+        var sb = new StringBuilder();
+        sb.Append("""
+<style>
+.cfg-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200}
+.cfg-modal-box{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:201;background:#1a1d27;border-radius:10px;width:min(96vw,640px);overflow:hidden}
+.cfg-modal-hdr{display:flex;align-items:center;justify-content:space-between;padding:.9rem 1.25rem;background:#222536}
+.cfg-modal-hdr h3{font-size:1rem;font-weight:600}
+.cfg-close-btn{background:none;border:none;color:#aaa;font-size:1.1rem;cursor:pointer;padding:.1rem .4rem;border-radius:3px}
+.cfg-close-btn:hover{background:#333;color:#fff}
+.cfg-tabs{display:flex;gap:0;border-bottom:1px solid #252836;background:#1a1d27;padding:0 1.25rem}
+.cfg-tab{background:none;border:none;border-bottom:2px solid transparent;color:#888;font-size:.85rem;padding:.65rem 1rem;cursor:pointer;font-weight:500}
+.cfg-tab.active{color:#5ba4f5;border-bottom-color:#5ba4f5}
+.cfg-panel{padding:1.25rem;display:none}
+.cfg-panel.active{display:block}
+.cfg-pre{background:#0f1117;border:1px solid #252836;border-radius:6px;padding:.85rem 1rem;font-size:.78rem;font-family:monospace;color:#b0c4de;white-space:pre-wrap;word-break:break-all;max-height:320px;overflow:auto;margin-bottom:.85rem}
+.cfg-cli{background:#0f1117;border:1px solid #252836;border-radius:6px;padding:.85rem 1rem;font-size:.82rem;font-family:monospace;color:#b0c4de;white-space:pre-wrap;word-break:break-all;margin-bottom:.85rem}
+.cfg-modal-ftr{display:flex;gap:.5rem;padding:.9rem 1.25rem;background:#141620;justify-content:flex-end}
+.cfg-btn{display:inline-block;padding:.45rem 1rem;background:#5ba4f5;color:#fff;border:none;border-radius:5px;font-size:.85rem;cursor:pointer;font-weight:600;text-decoration:none}
+.cfg-btn:hover{background:#3d8fe0}
+.cfg-btn-sec{background:transparent;border:1px solid #444;color:#aaa}
+.cfg-btn-sec:hover{background:#252836;border-color:#5ba4f5;color:#e0e0e0}
+</style>
+<div id="cfg-modal" role="dialog" aria-modal="true" hidden>
+  <div class="cfg-modal-backdrop" onclick="closeConfigModal()"></div>
+  <div class="cfg-modal-box">
+    <div class="cfg-modal-hdr">
+      <h3>Server Configuration</h3>
+      <button class="cfg-close-btn" onclick="closeConfigModal()">&#x2715;</button>
+    </div>
+    <div class="cfg-tabs">
+      <button class="cfg-tab active" id="cfg-tab-json" onclick="switchCfgTab('json')">Config File</button>
+      <button class="cfg-tab" id="cfg-tab-cli" onclick="switchCfgTab('cli')">CLI Command</button>
+    </div>
+""");
+        sb.Append($"""
+    <div id="cfg-panel-json" class="cfg-panel active">
+      <pre class="cfg-pre">{jsonEncoded}</pre>
+      <div style="font-size:.78rem;color:#666;margin-bottom:.85rem">Passwords are omitted. Save as <code>filebeam.json</code> in the working directory or pass with <code>--config</code>.</div>
+    </div>
+    <div id="cfg-panel-cli" class="cfg-panel">
+      <pre class="cfg-cli">{cliEncoded}</pre>
+      <div style="font-size:.78rem;color:#666;margin-bottom:.85rem">Password flags are omitted. Add <code>--password</code> or <code>--credentials-file</code> as needed.</div>
+    </div>
+""");
+        sb.Append("""
+    <div class="cfg-modal-ftr">
+      <button class="cfg-btn cfg-btn-sec" onclick="closeConfigModal()">Close</button>
+      <a id="cfg-download-btn" class="cfg-btn" href="/admin/config" download="filebeam.json">Download JSON</a>
+      <button id="cfg-copy-btn" class="cfg-btn" style="display:none" onclick="copyCfgCli()">Copy</button>
+    </div>
+  </div>
+</div>
+<script>
+function openConfigModal() {
+  document.getElementById('cfg-modal').hidden = false;
+  switchCfgTab('json');
+}
+function closeConfigModal() {
+  document.getElementById('cfg-modal').hidden = true;
+}
+function switchCfgTab(tab) {
+  document.getElementById('cfg-tab-json').classList.toggle('active', tab === 'json');
+  document.getElementById('cfg-tab-cli').classList.toggle('active', tab === 'cli');
+  document.getElementById('cfg-panel-json').classList.toggle('active', tab === 'json');
+  document.getElementById('cfg-panel-cli').classList.toggle('active', tab === 'cli');
+  document.getElementById('cfg-download-btn').style.display = tab === 'json' ? '' : 'none';
+  document.getElementById('cfg-copy-btn').style.display     = tab === 'cli'  ? '' : 'none';
+}
+function copyCfgCli() {
+  const text = document.querySelector('#cfg-panel-cli pre').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('cfg-copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 1600);
+  });
+}
+</script>
+""");
+        return sb.ToString();
     }
 
     // ── Admin Invites page ────────────────────────────────────────────────────

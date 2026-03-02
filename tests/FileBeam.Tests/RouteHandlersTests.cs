@@ -938,4 +938,35 @@ public sealed class RouteHandlersTests : IDisposable
         Assert.Contains("tokenPrefix", body);
         Assert.Contains("expiresIn", body);
     }
+
+    // ── GetAdminConfig ────────────────────────────────────────────────────────
+
+    [Fact]
+    public void GetAdminConfig_NonAdmin_Returns403()
+    {
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher,
+            configJson: "{\"port\":8080}", cliCommand: "filebeam.exe --download /srv");
+
+        var result = handlers.GetAdminConfig(MakeContext());
+        Assert.Equal(403, StatusCode(result));
+    }
+
+    [Fact]
+    public async Task GetAdminConfig_Admin_ReturnsJson()
+    {
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher,
+            configJson: "{\"port\":8080}", cliCommand: "filebeam.exe --download /srv");
+
+        var body = await ReadBodyAsync(handlers.GetAdminConfig(MakeAdminContext()));
+        Assert.Contains("\"port\"", body);
+        Assert.Contains("8080", body);
+    }
+
+    [Fact]
+    public void GetAdminConfig_NoConfigJson_Returns501()
+    {
+        // Default handlers have empty configJson
+        var result = _handlers.GetAdminConfig(MakeAdminContext());
+        Assert.Equal(501, StatusCode(result));
+    }
 }

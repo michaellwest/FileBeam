@@ -178,6 +178,19 @@ Any field may be omitted to leave it unchanged. Set `clearExpiry: true` to remov
 
 **Revocation:** deleting a token via `DELETE /admin/invites/{id}` sets it inactive immediately. All browser sessions issued via that invite are rejected from the next request onward.
 
+#### Admin config export
+
+Admin users get a **Config** link in the navigation bar (visible on the main browse page). Clicking it opens a two-tab modal:
+
+- **Config File** tab — shows the current resolved configuration as indented JSON (passwords always omitted). A **Download JSON** button downloads it as `filebeam.json`, ready to use with `--config` or by dropping it in the working directory.
+- **CLI Command** tab — shows the equivalent `filebeam.exe ...` command line (passwords omitted). A **Copy** button copies it to the clipboard.
+
+The underlying data is also available as a plain JSON API endpoint:
+
+| Method | Endpoint        | Description                                                     |
+| ------ | --------------- | --------------------------------------------------------------- |
+| `GET`  | `/admin/config` | Returns effective resolved config as JSON (admin role required) |
+
 #### Per-sender upload folders
 
 When `--per-sender` is set, each uploader's files land in their own subfolder inside the upload directory:

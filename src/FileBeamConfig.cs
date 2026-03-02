@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -57,6 +58,71 @@ internal sealed class FileBeamConfig
             error = ex.Message;
             return false;
         }
+    }
+
+    /// <summary>
+    /// Builds an equivalent CLI invocation string for the given resolved configuration.
+    /// The --password flag is always omitted; all other flags that differ from their defaults
+    /// (or are non-null) are included.
+    /// </summary>
+    public static string ToCliCommand(
+        string  download,
+        string  upload,
+        int     port,
+        string? credentialsFile,
+        string? invitesFile,
+        bool    readOnly,
+        bool    perSender,
+        long    maxFileSize,
+        long    maxUploadBytes,
+        long    maxUploadTotal,
+        long?   maxUploadSize,
+        string? tlsCert,
+        string? tlsKey,
+        int     shareTtl,
+        string? auditLog,
+        long    auditLogMaxSize,
+        int     rateLimit,
+        string  logLevel)
+    {
+        var sb = new StringBuilder("filebeam.exe");
+        sb.Append($" --download \"{download}\"");
+        if (!string.Equals(download, upload, StringComparison.OrdinalIgnoreCase))
+            sb.Append($" --upload \"{upload}\"");
+        if (port != 8080)
+            sb.Append($" --port {port}");
+        if (credentialsFile != null)
+            sb.Append($" --credentials-file \"{credentialsFile}\"");
+        if (invitesFile != null)
+            sb.Append($" --invites-file \"{invitesFile}\"");
+        if (readOnly)
+            sb.Append(" --readonly");
+        if (perSender)
+            sb.Append(" --per-sender");
+        if (maxFileSize > 0)
+            sb.Append($" --max-file-size {FormatBytes(maxFileSize)}");
+        if (maxUploadBytes > 0)
+            sb.Append($" --max-upload-bytes {FormatBytes(maxUploadBytes)}");
+        if (maxUploadTotal > 0)
+            sb.Append($" --max-upload-total {FormatBytes(maxUploadTotal)}");
+        if (maxUploadSize.HasValue && maxUploadSize > 0)
+            sb.Append($" --max-upload-size {FormatBytes(maxUploadSize.Value)}");
+        if (tlsCert != null)
+            sb.Append($" --tls-cert \"{tlsCert}\"");
+        if (tlsKey != null)
+            sb.Append($" --tls-key \"{tlsKey}\"");
+        if (shareTtl != 3600)
+            sb.Append($" --share-ttl {shareTtl}");
+        if (auditLog != null)
+            sb.Append($" --audit-log \"{auditLog}\"");
+        if (auditLogMaxSize > 0)
+            sb.Append($" --audit-log-max-size {FormatBytes(auditLogMaxSize)}");
+        if (rateLimit != 60)
+            sb.Append($" --rate-limit {rateLimit}");
+        if (logLevel != "info")
+            sb.Append($" --log-level {logLevel}");
+        // --password intentionally omitted
+        return sb.ToString();
     }
 
     /// <summary>

@@ -464,4 +464,100 @@ public sealed class InvitesAdminPageTests
         Assert.DoesNotContain("<script>alert(1)</script>", html);
         Assert.Contains("&lt;script&gt;", html);
     }
+
+    // ── BuildAdminConfigModal ─────────────────────────────────────────────────
+
+    [Fact]
+    public void BuildAdminConfigModal_ContainsBothTabs()
+    {
+        var html = HtmlRenderer.BuildAdminConfigModal("{\"port\":8080}", "filebeam.exe --download /srv");
+
+        Assert.Contains("Config File", html);
+        Assert.Contains("CLI Command", html);
+    }
+
+    [Fact]
+    public void BuildAdminConfigModal_ContainsConfigJson()
+    {
+        var html = HtmlRenderer.BuildAdminConfigModal("{\"port\":8080}", "filebeam.exe");
+
+        Assert.Contains("&quot;port&quot;", html);  // HTML-encoded JSON
+        Assert.Contains("8080", html);
+    }
+
+    [Fact]
+    public void BuildAdminConfigModal_ContainsCliCommand()
+    {
+        var html = HtmlRenderer.BuildAdminConfigModal("{}", "filebeam.exe --download /srv --port 9090");
+
+        Assert.Contains("--download", html);
+        Assert.Contains("9090", html);
+    }
+
+    [Fact]
+    public void BuildAdminConfigModal_XssInJsonEncoded()
+    {
+        var html = HtmlRenderer.BuildAdminConfigModal("<script>bad</script>", "cmd");
+
+        Assert.DoesNotContain("<script>bad</script>", html);
+        Assert.Contains("&lt;script&gt;", html);
+    }
+
+    [Fact]
+    public void BuildAdminConfigModal_ContainsDownloadLink()
+    {
+        var html = HtmlRenderer.BuildAdminConfigModal("{}", "cmd");
+
+        Assert.Contains("href=\"/admin/config\"", html);
+        Assert.Contains("download=\"filebeam.json\"", html);
+    }
+
+    [Fact]
+    public void BuildAdminConfigModal_ContainsOpenConfigModalFunction()
+    {
+        var html = HtmlRenderer.BuildAdminConfigModal("{}", "cmd");
+
+        Assert.Contains("openConfigModal", html);
+        Assert.Contains("closeConfigModal", html);
+    }
+
+    // ── BuildNavLinks hasConfig ───────────────────────────────────────────────
+
+    [Fact]
+    public void BuildNavLinks_AdminWithHasConfig_ContainsConfigLink()
+    {
+        var nav = HtmlRenderer.BuildNavLinks("admin", false, false, hasConfig: true);
+
+        Assert.Contains("openConfigModal", nav);
+        Assert.Contains("Config", nav);
+    }
+
+    [Fact]
+    public void BuildNavLinks_NonAdminWithHasConfig_DoesNotContainConfigLink()
+    {
+        var nav = HtmlRenderer.BuildNavLinks("rw", false, false, hasConfig: true);
+
+        Assert.DoesNotContain("openConfigModal", nav);
+        Assert.DoesNotContain("Config", nav);
+    }
+
+    [Fact]
+    public void RenderDirectory_AdminConfigModal_IsInjected()
+    {
+        var modal = HtmlRenderer.BuildAdminConfigModal("{\"port\":8080}", "filebeam.exe");
+        var html  = HtmlRenderer.RenderDirectory("", new List<DirectoryInfo>(), new List<FileInfo>(),
+            role: "admin", adminConfigModal: modal);
+
+        Assert.Contains("cfg-modal", html);
+        Assert.Contains("openConfigModal", html);
+    }
+
+    [Fact]
+    public void RenderDirectory_NoAdminConfigModal_HasNoConfigModal()
+    {
+        var html = HtmlRenderer.RenderDirectory("", new List<DirectoryInfo>(), new List<FileInfo>(), role: "rw");
+
+        Assert.DoesNotContain("cfg-modal", html);
+        Assert.DoesNotContain("openConfigModal", html);
+    }
 }

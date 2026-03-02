@@ -96,7 +96,9 @@ public class RouteHandlers(
     InviteStore? inviteStore = null,
     byte[]? sessionKey = null,
     bool isTls = false,
-    Action<string, string>? debugLog = null)
+    Action<string, string>? debugLog = null,
+    string configJson = "",
+    string cliCommand = "")
 {
     // Tracks cumulative bytes uploaded per sender key (IP or username).
     // Best-effort only — not atomic across concurrent uploads from the same sender.
@@ -286,9 +288,11 @@ public class RouteHandlers(
         };
 
         bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
-        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, isReadOnly: isReadOnly, hasInvites: inviteStore is not null);
+        bool hasConfig = role == "admin" && configJson.Length > 0;
+        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, isReadOnly: isReadOnly, hasInvites: inviteStore is not null, hasConfig: hasConfig);
+        var adminModal = hasConfig ? HtmlRenderer.BuildAdminConfigModal(configJson, cliCommand) : "";
         var html = HtmlRenderer.RenderDirectory(relPath, dirs.ToList(), files.ToList(), isReadOnly, csrfToken, sort, order, role,
-            separateUploadDir: separateDir, navLinks: navLinks, perSender: perSender);
+            separateUploadDir: separateDir, navLinks: navLinks, perSender: perSender, adminConfigModal: adminModal);
         return Results.Content(html, "text/html");
     }
 
@@ -917,6 +921,18 @@ public class RouteHandlers(
             return Results.NoContent();
 
         return Results.Json(new { availableBytes = available.Value, totalBytes = total!.Value });
+    }
+
+    // GET /admin/config  — return resolved config as JSON (admin only, used by config export modal)
+    public IResult GetAdminConfig(HttpContext ctx)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (configJson.Length == 0)
+            return Results.StatusCode(StatusCodes.Status501NotImplemented);
+
+        return Results.Content(configJson, "application/json");
     }
 
     // GET /admin/shares  — list all live share tokens with creator (admin only)
