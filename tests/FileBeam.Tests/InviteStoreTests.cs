@@ -295,19 +295,21 @@ public sealed class InviteStoreTests
         var store = new InviteStore();
         var token = store.Create("Alice", "rw", null, "admin", joinMaxUses: 2);
         store.TryRedeem(token.Id);
-        store.TryRedeem(token.Id); // reaches cap, auto-deactivates
+        store.TryRedeem(token.Id); // reaches cap
         Assert.Null(store.TryRedeem(token.Id));
     }
 
     [Fact]
-    public void TryRedeem_LastValidRedeem_AutoDeactivates()
+    public void TryRedeem_LastValidRedeem_InviteStaysActive()
     {
+        // The invite must remain active after the cap is reached so that sessions
+        // already issued from it continue to pass TryValidateSessionCookie.
         var store  = new InviteStore();
         var token  = store.Create("Alice", "rw", null, "admin", joinMaxUses: 1);
         var result = store.TryRedeem(token.Id);
         Assert.NotNull(result);
         Assert.Equal(1, result!.UseCount);
-        Assert.False(result.IsActive);
+        Assert.True(result.IsActive);
     }
 
     [Fact]

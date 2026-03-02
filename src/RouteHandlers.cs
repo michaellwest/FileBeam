@@ -1197,7 +1197,30 @@ public class RouteHandlers(
         if (inviteStore is null)
             return Results.Content(JoinErrorHtml("Invites are not enabled on this server."), "text/html");
 
-        var invite = inviteStore.TryRedeem(token);
+        // If the request already carries a valid session for this exact invite, skip TryRedeem
+        // so that refreshing the /join page doesn't burn an additional use against the quota.
+        InviteToken? invite = null;
+        if (sessionKey is not null && ctx.Request.Cookies.TryGetValue("fb.session", out var existingCookie))
+        {
+            var dot = existingCookie.LastIndexOf('.');
+            if (dot > 0)
+            {
+                try
+                {
+                    var payloadBytes   = Base64UrlDecode(existingCookie[..dot]);
+                    using var doc      = JsonDocument.Parse(payloadBytes);
+                    var existingTokenId = doc.RootElement.GetProperty("tokenId").GetString();
+                    if (existingTokenId == token &&
+                        TryValidateSessionCookie(existingCookie, sessionKey, inviteStore, out _, out _))
+                    {
+                        inviteStore.TryGet(token, out invite);
+                    }
+                }
+                catch { /* fall through to TryRedeem */ }
+            }
+        }
+
+        invite ??= inviteStore.TryRedeem(token);
         if (invite is null)
             return Results.Content(
                 JoinErrorHtml("This invite link is invalid, expired, or has been revoked."),

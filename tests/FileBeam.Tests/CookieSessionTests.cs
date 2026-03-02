@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 
 namespace FileBeam.Tests;
 
@@ -189,5 +190,87 @@ public sealed class CookieSessionTests
         var cookie   = BuildCookie(TestKey, "anyid", "rw", pastUnix);
 
         Assert.False(RouteHandlers.TryValidateSessionCookie(cookie, TestKey, inviteStore: null, out _, out _));
+    }
+
+    // ── JoinWithInvite — session stays valid after cap ─────────────────────────
+
+    [Fact]
+    public void SingleUseInvite_SessionRemainsValidAfterRedemption()
+    {
+        // Regression: previously TryRedeem set IsActive=false on the last use, which
+        // immediately invalidated the session cookie it had just issued.
+        var store  = new InviteStore();
+        var invite = store.Create("Alice", "rw", null, "admin", joinMaxUses: 1);
+        var cookie = BuildCookie(TestKey, invite.Id, invite.Role);
+
+        // Simulate what happens after /join: UseCount is now 1, cap is reached.
+        store.TryRedeem(invite.Id);
+
+        // The session cookie issued during that redemption must still be valid.
+        Assert.True(RouteHandlers.TryValidateSessionCookie(cookie, TestKey, store, out _, out _));
+    }
+
+    [Fact]
+    public void JoinWithInvite_RefreshWithExistingSession_DoesNotIncrementUseCount()
+    {
+        var tmpDir  = Directory.CreateTempSubdirectory("fb_join_").FullName;
+        try
+        {
+            var store    = new InviteStore();
+            var invite   = store.Create("Bob", "rw", null, "admin", joinMaxUses: 1);
+            var watcher  = new FileWatcher(tmpDir);
+            var handlers = new RouteHandlers(tmpDir, tmpDir, watcher,
+                inviteStore: store, sessionKey: TestKey);
+
+            // First visit: no cookie → TryRedeem → UseCount becomes 1
+            var ctx1 = new DefaultHttpContext();
+            ctx1.Response.Body = new MemoryStream();
+            handlers.JoinWithInvite(ctx1, invite.Id);
+
+            store.TryGet(invite.Id, out var afterFirst);
+            Assert.Equal(1, afterFirst!.UseCount);
+
+            // Build the session cookie that was set during the first visit
+            var cookie = BuildCookie(TestKey, invite.Id, invite.Role);
+
+            // Second visit: same session cookie → should skip TryRedeem
+            var ctx2 = new DefaultHttpContext();
+            ctx2.Response.Body = new MemoryStream();
+            ctx2.Request.Headers["Cookie"] = $"fb.session={cookie}";
+            handlers.JoinWithInvite(ctx2, invite.Id);
+
+            store.TryGet(invite.Id, out var afterRefresh);
+            Assert.Equal(1, afterRefresh!.UseCount); // unchanged
+            watcher.Dispose();
+        }
+        finally { Directory.Delete(tmpDir, recursive: true); }
+    }
+
+    [Fact]
+    public void JoinWithInvite_SessionForDifferentToken_StillCallsTryRedeem()
+    {
+        var tmpDir = Directory.CreateTempSubdirectory("fb_join2_").FullName;
+        try
+        {
+            var store    = new InviteStore();
+            var inviteA  = store.Create("Alice", "rw", null, "admin");
+            var inviteB  = store.Create("Bob",   "rw", null, "admin");
+            var watcher  = new FileWatcher(tmpDir);
+            var handlers = new RouteHandlers(tmpDir, tmpDir, watcher,
+                inviteStore: store, sessionKey: TestKey);
+
+            // Cookie is for invite A, but we're joining with invite B
+            var cookieForA = BuildCookie(TestKey, inviteA.Id, inviteA.Role);
+
+            var ctx = new DefaultHttpContext();
+            ctx.Response.Body = new MemoryStream();
+            ctx.Request.Headers["Cookie"] = $"fb.session={cookieForA}";
+            handlers.JoinWithInvite(ctx, inviteB.Id);
+
+            store.TryGet(inviteB.Id, out var b);
+            Assert.Equal(1, b!.UseCount); // TryRedeem was called for B
+            watcher.Dispose();
+        }
+        finally { Directory.Delete(tmpDir, recursive: true); }
     }
 }

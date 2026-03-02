@@ -116,7 +116,8 @@ public sealed class InviteStore
     /// Validates that the token is active and not expired, atomically increments
     /// <see cref="InviteToken.UseCount"/>, and returns the updated token.
     /// Returns <c>null</c> if the token is missing, inactive, expired, or has reached its join cap.
-    /// Auto-deactivates the invite when the join cap is reached.
+    /// The token remains active after the cap is reached so that sessions already issued stay valid;
+    /// further redemptions are blocked by the cap check.
     /// </summary>
     public InviteToken? TryRedeem(string id)
     {
@@ -125,18 +126,12 @@ public sealed class InviteStore
         if (t.ExpiresAt.HasValue && t.ExpiresAt.Value < DateTimeOffset.UtcNow) return null;
         if (t.JoinMaxUses.HasValue && t.UseCount >= t.JoinMaxUses.Value) return null;
 
-        // Atomic compare-and-swap increment; auto-deactivate when cap is reached
+        // Atomic compare-and-swap increment
         InviteToken current, updated;
         do
         {
             current = _tokens[id];
-            var newCount   = current.UseCount + 1;
-            var capReached = current.JoinMaxUses.HasValue && newCount >= current.JoinMaxUses.Value;
-            updated = current with
-            {
-                UseCount = newCount,
-                IsActive = capReached ? false : current.IsActive,
-            };
+            updated = current with { UseCount = current.UseCount + 1 };
         }
         while (!_tokens.TryUpdate(id, updated, current));
 
