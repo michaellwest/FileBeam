@@ -310,7 +310,7 @@ public static class HtmlRenderer
                 {
                     // Upload-area resolves files from uploadDir; /info/ and admin mutation endpoints
                     // use rootDir so they must not be shown here.
-                    actionsCell = $"""<button class="act-btn" title="Preview" onclick="fbPreview('{href}','{nameJs}','{extJs}')">👁️</button>""";
+                    actionsCell = "";
                 }
                 else
                 {
@@ -324,7 +324,6 @@ public static class HtmlRenderer
                         : "";
                     actionsCell = $"""
                             <button class="act-btn" title="File info" onclick="fbInfo('{browseInfoUrl}','{nameJs}')">ℹ️</button>
-                            <button class="act-btn" title="Preview" onclick="fbPreview('{href}','{nameJs}','{extJs}')">👁️</button>
                             {adminButtons}
                       """;
                 }
@@ -460,9 +459,21 @@ function switchCfgTab(tab) {
   document.getElementById('cfg-download-btn').style.display = tab === 'json' ? '' : 'none';
   document.getElementById('cfg-copy-btn').style.display     = tab === 'cli'  ? '' : 'none';
 }
+function cfgCopy(text) {
+  if (navigator.clipboard && window.isSecureContext)
+    return navigator.clipboard.writeText(text);
+  const el = document.createElement('textarea');
+  el.value = text;
+  el.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+  document.body.appendChild(el);
+  el.select();
+  try { document.execCommand('copy'); } catch {}
+  document.body.removeChild(el);
+  return Promise.resolve();
+}
 function copyCfgCli() {
   const text = document.querySelector('#cfg-panel-cli pre').textContent;
-  navigator.clipboard.writeText(text).then(() => {
+  cfgCopy(text).then(() => {
     const btn = document.getElementById('cfg-copy-btn');
     btn.textContent = 'Copied!';
     setTimeout(() => btn.textContent = 'Copy', 1600);
@@ -670,9 +681,23 @@ async function createInvite() {
   }
 }
 
+function fbCopy(text) {
+  if (navigator.clipboard && window.isSecureContext)
+    return navigator.clipboard.writeText(text);
+  // Fallback for plain HTTP (LAN) where clipboard API is unavailable
+  const el = document.createElement('textarea');
+  el.value = text;
+  el.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+  document.body.appendChild(el);
+  el.select();
+  try { document.execCommand('copy'); } catch {}
+  document.body.removeChild(el);
+  return Promise.resolve();
+}
+
 function copyGeneratedLink() {
   const url = document.getElementById('link-url').value;
-  navigator.clipboard.writeText(url).then(() => {
+  fbCopy(url).then(() => {
     const btn = document.getElementById('copy-btn');
     btn.textContent = 'Copied!';
     setTimeout(() => btn.textContent = 'Copy', 1600);
@@ -680,7 +705,7 @@ function copyGeneratedLink() {
 }
 
 function copyInviteLink(id, url) {
-  navigator.clipboard.writeText(url).then(() => {
+  fbCopy(url).then(() => {
     const btn = document.getElementById('cp-' + id);
     if (btn) { const orig = btn.textContent; btn.textContent = '\u2713'; setTimeout(() => btn.textContent = orig, 1600); }
   });

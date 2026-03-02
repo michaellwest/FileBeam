@@ -186,6 +186,7 @@ public class RouteHandlers(
     /// </summary>
     private string ResolveSenderKey(HttpContext ctx)
     {
+        // 1. Basic Auth username (stable, explicitly chosen by the user)
         var header = ctx.Request.Headers.Authorization.ToString();
         if (header.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
         {
@@ -197,6 +198,10 @@ public class RouteHandlers(
             }
             catch { /* malformed — fall through */ }
         }
+        // 2. Cookie session user set by invite-based auth (e.g. "invite:Alice")
+        if (ctx.Items.TryGetValue("fb.user", out var u) && u is string sessionUser && !string.IsNullOrEmpty(sessionUser))
+            return SanitizeName(sessionUser);
+        // 3. Remote IP — last resort (not unique behind NAT / IPv6)
         return SanitizeName(ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown");
     }
 
