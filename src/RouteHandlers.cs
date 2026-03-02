@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Channels;
 using System.Web;
 using Microsoft.AspNetCore.Http;
@@ -1132,7 +1134,7 @@ public class RouteHandlers(
             ctx.Response.Cookies.Append("fb.session", cookieValue, cookieOpts);
         }
 
-        return Results.Redirect("/");
+        return Results.Content(JoinSuccessHtml(invite.FriendlyName, invite.Role), "text/html");
     }
 
     // ── Invite helpers ─────────────────────────────────────────────────────────
@@ -1162,6 +1164,109 @@ public class RouteHandlers(
 
     private static string Base64UrlEncode(byte[] data) =>
         Convert.ToBase64String(data).Replace('+', '-').Replace('/', '_').TrimEnd('=');
+
+    private static byte[] Base64UrlDecode(string s)
+    {
+        var padded = s.Replace('-', '+').Replace('_', '/');
+        padded += (padded.Length % 4) switch { 2 => "==", 3 => "=", _ => "" };
+        return Convert.FromBase64String(padded);
+    }
+
+    /// <summary>
+    /// Validates a signed <c>fb.session</c> cookie value and returns the authenticated role
+    /// and user identity if valid.
+    /// </summary>
+    /// <remarks>
+    /// Cookie format: <c>Base64Url(payloadJson) + "." + Base64Url(HMAC-SHA256(key, payloadB64))</c>
+    /// Validation rejects cookies with bad signatures, expired sessions, or revoked/inactive invite tokens.
+    /// When <paramref name="inviteStore"/> is provided the live token state is always checked, so
+    /// revoking an invite immediately invalidates all issued cookies.
+    /// </remarks>
+    public static bool TryValidateSessionCookie(
+        string       cookieValue,
+        byte[]       sessionKey,
+        InviteStore? inviteStore,
+        out string?  role,
+        out string?  user)
+    {
+        role = null;
+        user = null;
+
+        var dot = cookieValue.LastIndexOf('.');
+        if (dot < 0) return false;
+
+        var payloadB64 = cookieValue[..dot];
+        var sigB64     = cookieValue[(dot + 1)..];
+
+        byte[] expectedSig;
+        try   { expectedSig = Base64UrlDecode(sigB64); }
+        catch { return false; }
+
+        var actualSig = HMACSHA256.HashData(sessionKey, Encoding.UTF8.GetBytes(payloadB64));
+        if (!CryptographicOperations.FixedTimeEquals(expectedSig, actualSig)) return false;
+
+        byte[] payloadBytes;
+        try   { payloadBytes = Base64UrlDecode(payloadB64); }
+        catch { return false; }
+
+        try
+        {
+            using var doc  = JsonDocument.Parse(payloadBytes);
+            var root       = doc.RootElement;
+
+            var tokenId    = root.GetProperty("tokenId").GetString();
+            var cookieRole = root.GetProperty("role").GetString();
+
+            if (string.IsNullOrEmpty(tokenId) || string.IsNullOrEmpty(cookieRole)) return false;
+
+            // Check cookie-level expiry (fast path — avoids a store lookup when clearly stale)
+            if (root.TryGetProperty("expiresAt", out var expEl) && expEl.ValueKind != JsonValueKind.Null)
+            {
+                if (DateTimeOffset.UtcNow.ToUnixTimeSeconds() > expEl.GetInt64()) return false;
+            }
+
+            // Validate live token state (catches revocations after the cookie was issued)
+            if (inviteStore is not null)
+            {
+                if (!inviteStore.TryGet(tokenId, out var invite)) return false;
+                if (!invite!.IsActive) return false;
+                if (invite.ExpiresAt.HasValue && invite.ExpiresAt.Value < DateTimeOffset.UtcNow) return false;
+
+                role = invite.Role;           // use live role — may have been edited since issue
+                user = $"invite:{invite.FriendlyName}";
+            }
+            else
+            {
+                role = cookieRole;
+                user = "invite:?";
+            }
+
+            return true;
+        }
+        catch { return false; }
+    }
+
+    private static string JoinSuccessHtml(string friendlyName, string role) =>
+        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">" +
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+        "<title>Invite Accepted \u2014 FileBeam</title>" +
+        "<style>body{font-family:sans-serif;max-width:480px;margin:4rem auto;padding:0 1rem}" +
+        ".card{background:#f0f9f0;border:1px solid #6c6;border-radius:8px;padding:1.5rem}" +
+        "h2{margin-top:0}.role{font-weight:bold;color:#252}" +
+        ".note{margin-top:1.5rem;font-size:.85rem;color:#555;border-top:1px solid #ddd;padding-top:1rem}" +
+        ".btn{display:inline-block;margin-top:1.2rem;padding:.55rem 1.4rem;background:#22c55e;" +
+        "color:#fff;border-radius:6px;text-decoration:none;font-weight:bold}</style>" +
+        "</head><body>" +
+        "<h2>FileBeam</h2>" +
+        "<div class=\"card\">" +
+        "<h3>\u2713 Invite accepted</h3>" +
+        $"<p>Welcome, <span class=\"role\">{HttpUtility.HtmlEncode(friendlyName)}</span>! " +
+        $"You have been granted <span class=\"role\">{HttpUtility.HtmlEncode(role)}</span> access.</p>" +
+        "<a class=\"btn\" href=\"/\">Continue to FileBeam</a>" +
+        "</div>" +
+        "<div class=\"note\"><strong>CLI / curl users:</strong> Invite links use browser cookies. " +
+        "For command-line access use Basic Auth credentials if configured by the server admin.</div>" +
+        "</body></html>";
 
     private static string JoinErrorHtml(string message) =>
         "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">" +

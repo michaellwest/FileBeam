@@ -155,7 +155,7 @@ Invite management is done via the admin REST API (admin role required):
 | `GET`    | `/admin/invites`           | List all invite tokens (JSON)         |
 | `DELETE` | `/admin/invites/{id}`      | Revoke an invite                      |
 | `PATCH`  | `/admin/invites/{id}`      | Edit name / role / expiry             |
-| `GET`    | `/join/{token}`            | Redeem invite, set session cookie, redirect to `/` |
+| `GET`    | `/join/{token}`            | Redeem invite, set signed session cookie, show welcome page |
 
 **Create body** (`Content-Type: application/json`, `X-CSRF-Token: <token>`):
 ```json
@@ -171,7 +171,9 @@ Any field may be omitted to leave it unchanged. Set `clearExpiry: true` to remov
 
 **Persistence:** if `--invites-file` is set, tokens are saved to a JSON file automatically on create, revoke, or edit, and reloaded at startup. Without the flag, tokens are in-memory only and lost on restart.
 
-**Revocation:** deleting a token via `DELETE /admin/invites/{id}` sets it inactive immediately. Session cookies tied to the revoked token are rejected on the next request once Phase 3 cookie-auth middleware is in place.
+**Session cookies:** when a user visits their invite link, FileBeam sets a signed `fb.session` cookie (HMAC-SHA256, HttpOnly, SameSite=Lax). On subsequent requests the auth middleware verifies the signature and checks that the invite token is still active — revoking an invite immediately invalidates all cookies linked to it on the next request. The welcome page shown after joining includes a note for CLI users, who must use Basic Auth credentials if configured.
+
+**Revocation:** deleting a token via `DELETE /admin/invites/{id}` sets it inactive immediately. All browser sessions issued via that invite are rejected from the next request onward.
 
 #### Per-sender upload folders
 
