@@ -91,6 +91,9 @@ public class RouteHandlers(
     string csrfToken = "",
     int shareTtlSeconds = 3600,
     RevocationStore? revocationStore = null,
+    InviteStore? inviteStore = null,
+    byte[]? sessionKey = null,
+    bool isTls = false,
     Action<string, string>? debugLog = null)
 {
     // Tracks cumulative bytes uploaded per sender key (IP or username).
@@ -995,6 +998,181 @@ public class RouteHandlers(
         revocationStore?.UnrevokeIp(ip);
         return Results.Ok(new { unrevokedIp = ip });
     }
+
+    // ── Invite management ──────────────────────────────────────────────────────
+
+    // POST /admin/invites  — create a new invite token (admin only)
+    // Body: JSON { friendlyName, role, expiresAt? }
+    public async Task<IResult> CreateInvite(HttpContext ctx)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (inviteStore is null)
+            return Results.StatusCode(StatusCodes.Status501NotImplemented);
+
+        InviteCreateRequest? req;
+        try { req = await ctx.Request.ReadFromJsonAsync<InviteCreateRequest>(); }
+        catch { return Results.BadRequest("Invalid JSON body."); }
+
+        if (req is null || string.IsNullOrWhiteSpace(req.FriendlyName))
+            return Results.BadRequest("friendlyName is required.");
+
+        var validRoles = new[] { "admin", "rw", "ro", "wo" };
+        var role = req.Role?.ToLowerInvariant() ?? "rw";
+        if (!validRoles.Contains(role))
+            return Results.BadRequest($"Invalid role '{role}'. Valid roles: {string.Join(", ", validRoles)}.");
+
+        var creator = ctx.Items.TryGetValue("fb.user", out var u) && u is string s ? s : "admin";
+        var token   = inviteStore.Create(req.FriendlyName.Trim(), role, req.ExpiresAt, creator);
+
+        return Results.Json(TokenToDto(token), statusCode: StatusCodes.Status201Created);
+    }
+
+    // GET /admin/invites  — list all invite tokens (admin only)
+    public IResult ListInvites(HttpContext ctx)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (inviteStore is null)
+            return Results.StatusCode(StatusCodes.Status501NotImplemented);
+
+        return Results.Json(inviteStore.GetAll().Select(TokenToDto).ToList());
+    }
+
+    // DELETE /admin/invites/{id}  — revoke an invite token (admin only)
+    public IResult RevokeInvite(HttpContext ctx, string id)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (inviteStore is null)
+            return Results.StatusCode(StatusCodes.Status501NotImplemented);
+
+        if (!inviteStore.Revoke(id))
+            return Results.NotFound($"Invite '{id}' not found.");
+
+        return Results.Ok(new { revoked = id });
+    }
+
+    // PATCH /admin/invites/{id}  — edit an invite's name/role/expiry (admin only)
+    // Body: JSON { friendlyName?, role?, expiresAt?, clearExpiry? }
+    public async Task<IResult> EditInvite(HttpContext ctx, string id)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (inviteStore is null)
+            return Results.StatusCode(StatusCodes.Status501NotImplemented);
+
+        InviteEditRequest? req;
+        try { req = await ctx.Request.ReadFromJsonAsync<InviteEditRequest>(); }
+        catch { return Results.BadRequest("Invalid JSON body."); }
+
+        if (req is null)
+            return Results.BadRequest("Request body required.");
+
+        var validRoles = new[] { "admin", "rw", "ro", "wo" };
+        if (req.Role is not null && !validRoles.Contains(req.Role.ToLowerInvariant()))
+            return Results.BadRequest($"Invalid role '{req.Role}'.");
+
+        if (!inviteStore.Edit(id,
+                friendlyName: req.FriendlyName?.Trim(),
+                role:         req.Role?.ToLowerInvariant(),
+                expiresAt:    req.ExpiresAt,
+                clearExpiry:  req.ClearExpiry))
+            return Results.NotFound($"Invite '{id}' not found.");
+
+        inviteStore.TryGet(id, out var updated);
+        return Results.Json(updated is null ? null : TokenToDto(updated));
+    }
+
+    // GET /join/{token}  — redeem an invite, set session cookie, redirect to /
+    // This endpoint is exempt from auth middleware so unauthenticated users can reach it.
+    public IResult JoinWithInvite(HttpContext ctx, string token)
+    {
+        if (inviteStore is null)
+            return Results.Content(JoinErrorHtml("Invites are not enabled on this server."), "text/html");
+
+        var invite = inviteStore.TryRedeem(token);
+        if (invite is null)
+            return Results.Content(
+                JoinErrorHtml("This invite link is invalid, expired, or has been revoked."),
+                "text/html",
+                statusCode: StatusCodes.Status404NotFound);
+
+        // Build signed session cookie: Base64Url(payload) + "." + Base64Url(HMAC-SHA256(key, payload))
+        if (sessionKey is not null)
+        {
+            var payloadObj = new
+            {
+                tokenId    = invite.Id,
+                role       = invite.Role,
+                issuedAt   = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                expiresAt  = invite.ExpiresAt?.ToUnixTimeSeconds()
+            };
+            var payloadJson  = System.Text.Json.JsonSerializer.Serialize(payloadObj);
+            var payloadB64   = Base64UrlEncode(System.Text.Encoding.UTF8.GetBytes(payloadJson));
+            var sig          = System.Security.Cryptography.HMACSHA256.HashData(
+                                   sessionKey,
+                                   System.Text.Encoding.UTF8.GetBytes(payloadB64));
+            var cookieValue  = payloadB64 + "." + Base64UrlEncode(sig);
+
+            var cookieOpts = new CookieOptions
+            {
+                HttpOnly  = true,
+                SameSite  = SameSiteMode.Lax,
+                Secure    = isTls,
+                Path      = "/",
+            };
+            if (invite.ExpiresAt.HasValue)
+                cookieOpts.Expires = invite.ExpiresAt.Value;
+
+            ctx.Response.Cookies.Append("fb.session", cookieValue, cookieOpts);
+        }
+
+        return Results.Redirect("/");
+    }
+
+    // ── Invite helpers ─────────────────────────────────────────────────────────
+
+    private sealed record InviteCreateRequest(
+        string          FriendlyName,
+        string?         Role,
+        DateTimeOffset? ExpiresAt);
+
+    private sealed record InviteEditRequest(
+        string?         FriendlyName,
+        string?         Role,
+        DateTimeOffset? ExpiresAt,
+        bool            ClearExpiry = false);
+
+    private static object TokenToDto(InviteToken t) => new
+    {
+        id           = t.Id,
+        friendlyName = t.FriendlyName,
+        role         = t.Role,
+        expiresAt    = t.ExpiresAt?.ToString("o"),
+        useCount     = t.UseCount,
+        createdBy    = t.CreatedBy,
+        isActive     = t.IsActive,
+        createdAt    = t.CreatedAt.ToString("o"),
+    };
+
+    private static string Base64UrlEncode(byte[] data) =>
+        Convert.ToBase64String(data).Replace('+', '-').Replace('/', '_').TrimEnd('=');
+
+    private static string JoinErrorHtml(string message) =>
+        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">" +
+        "<title>Invite Error \u2014 FileBeam</title>" +
+        "<style>body{font-family:sans-serif;max-width:480px;margin:4rem auto;padding:0 1rem}" +
+        ".err{background:#fee;border:1px solid #faa;border-radius:6px;padding:1rem 1.5rem;color:#900}</style>" +
+        "</head><body>" +
+        "<h2>FileBeam Invite</h2>" +
+        $"<div class=\"err\">{HttpUtility.HtmlEncode(message)}</div>" +
+        "<p><a href=\"/\">Go to FileBeam</a></p>" +
+        "</body></html>";
 
     // GET /my-uploads  and  GET /my-uploads/browse/{**subpath}
     // Scoped to the authenticated sender's subfolder inside uploadDir.
