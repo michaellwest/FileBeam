@@ -330,7 +330,13 @@ if (cliTlsCert != null || cliTlsKey != null)
         }
     }
 
-    try { tlsCertificate = X509Certificate2.CreateFromPemFile(absCert, absKey); }
+    // Round-trip through PKCS12 so Windows SChannel can access the private key
+    // during the TLS handshake (ephemeral in-memory keys are not usable by SChannel).
+    try
+    {
+        using var ephemeral = X509Certificate2.CreateFromPemFile(absCert, absKey);
+        tlsCertificate = X509CertificateLoader.LoadPkcs12(ephemeral.Export(X509ContentType.Pkcs12), password: null);
+    }
     catch (Exception ex)
     {
         AnsiConsole.MarkupLine($"[red]Error:[/] failed to load TLS certificate: {Markup.Escape(ex.Message)}");
@@ -437,8 +443,9 @@ builder.WebHost.ConfigureKestrel(opts =>
     opts.Limits.MaxRequestBodySize = effectiveBodyLimit;
     opts.Listen(IPAddress.Any, port, listenOpts =>
     {
-        if (tlsCertificate != null)
+        if (tlsCertificate != null) {
             listenOpts.UseHttps(tlsCertificate);
+        }
     });
 });
 

@@ -50,6 +50,21 @@ Automatically delete uploaded files after a configurable TTL. Set at the server 
 - Client-side countdown JS reuses `_fmtExpiry()` pattern from invite expiry
 - 16 new tests (10 UploadExpirerTests + 6 HtmlRendererExpiryTests)
 
+#### FB-07a · Expiry cleanup logging ✅
+Console log output for every file the cleanup job touches, using AnsiConsole styled lines matching the existing request-log format.
+
+- **Deleted files:** `[EXPIR]` line with relative path and file age — e.g. `user/report.pdf — expired after 2h 30m`
+- **Admin-exempt files (past TTL, not deleted):** `[SKIP]` line with relative path — e.g. `admin/notes.txt — never expires`
+- **Fresh files:** no log line (unchanged)
+- **UI:** `/admin/uploads` expiry column shows "never expires" for files under the admin's exempt subfolder (when `--per-sender` is active); other senders' files still show a countdown. Same for the admin's own `/my-uploads` view.
+
+**Implementation:**
+- `UploadExpirer` accepts an optional `Action<string>? log` callback; `Program.cs` wires it to `AnsiConsole.MarkupLine`
+- `UploadExpirer.AdminSubfolder` property exposes the computed exempt path so `Program.cs` can forward it to `RouteHandlers`
+- `HtmlRenderer.RenderDirectory` gains `string? adminExemptPath` parameter; renders "never expires" cell instead of countdown when the file's full path is under that folder
+- `RouteHandlers` gains `string? adminExemptPath` parameter; passed through to admin/uploads and my-uploads render calls
+- ~6 new tests (log called/not called on deletion and exempt skip; "never expires" rendered in HTML)
+
 ### FB-08 · Audit log viewer
 A read-only admin page at `GET /admin/audit` that renders the last N lines of the NDJSON audit log in a table (timestamp, action, user, file, bytes, IP, request ID). Auto-refreshes every 30 seconds. Only available when `--audit-log` is configured. No new log format changes — parses the existing NDJSON.
 
