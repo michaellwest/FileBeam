@@ -14,16 +14,25 @@ public sealed class UploadExpirer : IAsyncDisposable
     private readonly string  _uploadDir;
     private readonly TimeSpan _ttl;
     private readonly string? _adminSubfolder; // set only when perSender=true
+    private readonly Action<string>? _log;
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _worker;
 
-    public UploadExpirer(string uploadDir, TimeSpan ttl, bool perSender, string adminUsername)
+    /// <summary>
+    /// The fully-qualified path of the admin user's subfolder inside <see cref="_uploadDir"/>.
+    /// <c>null</c> when <paramref name="perSender"/> was <c>false</c>.
+    /// </summary>
+    public string? AdminSubfolder => _adminSubfolder;
+
+    public UploadExpirer(string uploadDir, TimeSpan ttl, bool perSender, string adminUsername,
+        Action<string>? log = null)
     {
         _uploadDir = uploadDir;
         _ttl       = ttl;
         _adminSubfolder = perSender
             ? Path.GetFullPath(Path.Combine(uploadDir, SanitizeName(adminUsername)))
             : null;
+        _log   = log;
         _worker = Task.Run(RunAsync);
     }
 
@@ -53,12 +62,35 @@ public sealed class UploadExpirer : IAsyncDisposable
                 // Skip the admin's subfolder when perSender=true
                 if (_adminSubfolder is not null &&
                     path.StartsWith(_adminSubfolder, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (_log is not null)
+                    {
+                        try
+                        {
+                            if (File.GetLastWriteTimeUtc(path) < cutoff)
+                            {
+                                var rel = Path.GetRelativePath(_uploadDir, path).Replace('\\', '/');
+                                _log($"[SKIP]  {rel} — never expires");
+                            }
+                        }
+                        catch { /* ignore stat errors */ }
+                    }
                     continue;
+                }
 
                 try
                 {
-                    if (File.GetLastWriteTimeUtc(path) < cutoff)
+                    var lastWrite = File.GetLastWriteTimeUtc(path);
+                    if (lastWrite < cutoff)
+                    {
                         File.Delete(path);
+                        if (_log is not null)
+                        {
+                            var rel = Path.GetRelativePath(_uploadDir, path).Replace('\\', '/');
+                            var age = DateTime.UtcNow - lastWrite;
+                            _log($"[EXPIR] {rel} — expired after {FormatAge(age)}");
+                        }
+                    }
                 }
                 catch (IOException) { /* file locked / already deleted — skip */ }
                 catch (UnauthorizedAccessException) { /* no permission — skip */ }
@@ -95,6 +127,14 @@ public sealed class UploadExpirer : IAsyncDisposable
         await _cts.CancelAsync();
         try { await _worker; } catch (OperationCanceledException) { }
         _cts.Dispose();
+    }
+
+    private static string FormatAge(TimeSpan age)
+    {
+        if (age.TotalSeconds < 60)  return $"{(int)age.TotalSeconds}s";
+        if (age.TotalHours   < 1)   return $"{(int)age.TotalMinutes}m";
+        if (age.TotalDays    < 1)   return $"{(int)age.TotalHours}h {age.Minutes}m";
+        return $"{(int)age.TotalDays}d {age.Hours}h";
     }
 
     private static string SanitizeName(string name)

@@ -28,7 +28,8 @@ public static class HtmlRenderer
         string navLinks = "",
         bool perSender = false,
         string adminConfigModal = "",
-        TimeSpan? uploadTtl = null)
+        TimeSpan? uploadTtl = null,
+        string? adminExemptPath = null)
     {
         var segments = relPath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
 
@@ -64,7 +65,7 @@ public static class HtmlRenderer
             .Replace("{{NAV_LINKS}}",       navLinks)
             .Replace("{{BREADCRUMB}}",      BuildBreadcrumb(segments, urlBase))
             .Replace("{{THEAD}}",           BuildTHead(sort, order, urlBase, showExpiry))
-            .Replace("{{ROWS}}",            BuildRows(segments, dirs, files, isAdmin, urlBase, uploadTtl))
+            .Replace("{{ROWS}}",            BuildRows(segments, dirs, files, isAdmin, urlBase, uploadTtl, adminExemptPath))
             .Replace("{{UPLOAD_SECTION}}", uploadSection)
             .Replace("{{CSRF_TOKEN}}",      HttpUtility.HtmlAttributeEncode(csrfToken))
             .Replace("{{ADMIN_CONFIG_MODAL}}", adminConfigModal)
@@ -222,7 +223,8 @@ public static class HtmlRenderer
         List<FileInfo> files,
         bool isAdmin = false,
         string urlBase = "",
-        TimeSpan? uploadTtl = null)
+        TimeSpan? uploadTtl = null,
+        string? adminExemptPath = null)
     {
         // Determine URL prefixes based on the view root
         var browsePrefix   = string.IsNullOrEmpty(urlBase) ? "/browse/"       : $"/{urlBase}/browse/";
@@ -357,12 +359,22 @@ public static class HtmlRenderer
             string fileExpiryTd = "";
             if (uploadTtl.HasValue)
             {
-                var expiresAt  = file.LastWriteTimeUtc + uploadTtl.Value;
-                var isoExpiry  = HttpUtility.HtmlAttributeEncode(expiresAt.ToString("yyyy-MM-ddTHH:mm:ssZ"));
-                var diffSec    = (expiresAt - DateTime.UtcNow).TotalSeconds;
-                var expiryText = FormatExpiryText(diffSec);
-                var expiryColor = diffSec <= 0 ? "#e53e3e" : "#888";
-                fileExpiryTd = $"<td class=\"expires\" style=\"color:{expiryColor};font-size:.82rem\" data-expires=\"{isoExpiry}\">{HttpUtility.HtmlEncode(expiryText)}</td>";
+                bool isAdminExempt = adminExemptPath is not null &&
+                    file.FullName.StartsWith(adminExemptPath, StringComparison.OrdinalIgnoreCase);
+
+                if (isAdminExempt)
+                {
+                    fileExpiryTd = "<td class=\"expires\" style=\"color:#888;font-size:.82rem\">never expires</td>";
+                }
+                else
+                {
+                    var expiresAt  = file.LastWriteTimeUtc + uploadTtl.Value;
+                    var isoExpiry  = HttpUtility.HtmlAttributeEncode(expiresAt.ToString("yyyy-MM-ddTHH:mm:ssZ"));
+                    var diffSec    = (expiresAt - DateTime.UtcNow).TotalSeconds;
+                    var expiryText = FormatExpiryText(diffSec);
+                    var expiryColor = diffSec <= 0 ? "#e53e3e" : "#888";
+                    fileExpiryTd = $"<td class=\"expires\" style=\"color:{expiryColor};font-size:.82rem\" data-expires=\"{isoExpiry}\">{HttpUtility.HtmlEncode(expiryText)}</td>";
+                }
             }
 
             sb.AppendLine($"""

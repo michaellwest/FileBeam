@@ -486,7 +486,12 @@ AuditLogger? auditLogger = auditLogPath is not null
 // --upload-ttl <duration>  → auto-delete files from uploadDir after TTL
 // (absent)                 → no auto-deletion
 UploadExpirer? uploadExpirer = uploadTtl.HasValue
-    ? new UploadExpirer(uploadDir, uploadTtl.Value, perSender, adminUsername)
+    ? new UploadExpirer(uploadDir, uploadTtl.Value, perSender, adminUsername,
+        log: line =>
+        {
+            var t = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+            AnsiConsole.MarkupLine($"[grey]{t}[/]  {Markup.Escape(line)}");
+        })
     : null;
 
 Action<string, string>? debugLog = logLevel == "debug"
@@ -556,7 +561,8 @@ var handlers = new RouteHandlers(
     configJson:             configJson,
     cliCommand:             cliCommand,
     auditLogPath:           auditLogPath,
-    uploadTtl:              uploadTtl);
+    uploadTtl:              uploadTtl,
+    adminExemptPath:        uploadExpirer?.AdminSubfolder);
 
 // ── Console request log (with elapsed time) ──────────────────────────────────
 // Must be registered before route mappings so it wraps endpoint execution.
