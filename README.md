@@ -231,6 +231,19 @@ When `--audit-log` is configured with a file path (not `-`/stdout), an **Audit L
 
 The page returns `404 Not Found` when `--audit-log` is absent or set to `-` (stdout mode). Malformed or unparseable log lines are silently skipped.
 
+#### Active sessions dashboard
+
+A **Sessions** link appears in the admin navigation bar. It opens `GET /admin/sessions`, a real-time HTML dashboard showing every invite-based session (Bearer token or cookie) that has been active within the past 30 minutes.
+
+| Method | Endpoint                         | Description                                               |
+| ------ | -------------------------------- | --------------------------------------------------------- |
+| `GET`  | `/admin/sessions`                | Active invite sessions as HTML table (admin only)         |
+| `POST` | `/admin/sessions/{id}/revoke`    | Revoke the invite and clear its sessions (admin only)     |
+
+**Columns:** Invite name · Role badge (color-coded) · IP · Auth method (bearer/cookie) · Last seen (relative time)
+
+Each row has a **Revoke** button that immediately deactivates the underlying invite token and removes all associated session entries. The page auto-refreshes every 30 seconds. Admin's own Basic Auth sessions are not tracked (only invite-based auth appears here).
+
 #### Upload expiry auto-delete
 
 Use `--upload-ttl` to automatically delete uploaded files from `uploadDir` after a configurable time-to-live:

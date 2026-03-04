@@ -87,7 +87,7 @@ A read-only admin page at `GET /admin/audit` that renders the last N lines of th
 
 ## Larger
 
-### FB-09 · Active sessions dashboard
+### ✅ FB-09 · Active sessions dashboard
 
 An admin page at `GET /admin/sessions` showing all currently active invite-based sessions: invite name, role, IP address, last-seen timestamp, and a Revoke button that invalidates the invite immediately. Sessions are tracked via a lightweight in-memory registry updated by the auth middleware on each request. Complements the existing revocation system.
 

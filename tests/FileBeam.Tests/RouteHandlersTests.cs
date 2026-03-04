@@ -969,4 +969,64 @@ public sealed class RouteHandlersTests : IDisposable
         var result = _handlers.GetAdminConfig(MakeAdminContext());
         Assert.Equal(501, StatusCode(result));
     }
+
+    // ── GetAdminSessions ──────────────────────────────────────────────────────
+
+    [Fact]
+    public void GetAdminSessions_NonAdmin_Returns403()
+    {
+        var registry = new SessionRegistry();
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher, sessionRegistry: registry);
+
+        var result = handlers.GetAdminSessions(MakeContext());
+        Assert.Equal(403, StatusCode(result));
+    }
+
+    [Fact]
+    public async Task GetAdminSessions_Admin_ReturnsHtml()
+    {
+        var registry = new SessionRegistry();
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher, sessionRegistry: registry);
+
+        var body = await ReadBodyAsync(handlers.GetAdminSessions(MakeAdminContext()));
+        Assert.Contains("Sessions", body);
+        Assert.Contains("No active invite sessions", body);
+    }
+
+    // ── RevokeSession ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public void RevokeSession_NonAdmin_Returns403()
+    {
+        var store    = new InviteStore();
+        var registry = new SessionRegistry();
+        var invite   = store.Create("Alice", "rw", null, "admin");
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher,
+            inviteStore: store, sessionRegistry: registry);
+
+        var result = handlers.RevokeSession(MakeContext(), invite.Id);
+        Assert.Equal(403, StatusCode(result));
+    }
+
+    [Fact]
+    public async Task RevokeSession_Admin_RevokesAndRedirects()
+    {
+        var store    = new InviteStore();
+        var registry = new SessionRegistry();
+        var invite   = store.Create("Alice", "rw", null, "admin");
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher,
+            inviteStore: store, sessionRegistry: registry);
+
+        registry.Touch(invite.Id, invite.FriendlyName, invite.Role, "10.0.0.1", "bearer");
+
+        var result = handlers.RevokeSession(MakeAdminContext(), invite.Id);
+
+        // Invite is revoked
+        Assert.True(store.TryGet(invite.Id, out var revoked));
+        Assert.False(revoked!.IsActive);
+        // Session registry is cleared
+        Assert.Empty(registry.GetActive(store));
+        // Response redirects to /admin/sessions
+        Assert.Equal(302, await ExecuteAsync(result));
+    }
 }

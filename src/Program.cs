@@ -544,6 +544,8 @@ var cliCommand = FileBeamConfig.ToCliCommand(
     logLevel:        logLevel,
     uploadTtl:       uploadTtl.HasValue ? FormatDuration(uploadTtl.Value) : null);
 
+var sessionRegistry = new SessionRegistry();
+
 var handlers = new RouteHandlers(
     serveDir, uploadDir, fileWatcher,
     isReadOnly:             readOnly,
@@ -562,7 +564,8 @@ var handlers = new RouteHandlers(
     cliCommand:             cliCommand,
     auditLogPath:           auditLogPath,
     uploadTtl:              uploadTtl,
-    adminExemptPath:        uploadExpirer?.AdminSubfolder);
+    adminExemptPath:        uploadExpirer?.AdminSubfolder,
+    sessionRegistry:        sessionRegistry);
 
 // ── Console request log (with elapsed time) ──────────────────────────────────
 // Must be registered before route mappings so it wraps endpoint execution.
@@ -726,16 +729,25 @@ app.UseRateLimiter();
             ctx.Items["fb.role"] = bearerRole;
             ctx.Items["fb.user"] = bearerUser;
             authenticated = true;
+
+            // Track session for active sessions dashboard
+            var bearerTokenId = header[7..].Trim();
+            if (inviteStore.TryGet(bearerTokenId, out var bearerInvite))
+                sessionRegistry.Touch(bearerTokenId, bearerInvite!.FriendlyName, bearerRole!, ip, "bearer");
         }
 
         // 3. Session cookie — invite-based browser auth
         var sessionCookie = ctx.Request.Cookies["fb.session"];
         if (!authenticated && sessionCookie is not null &&
-            RouteHandlers.TryValidateSessionCookie(sessionCookie, sessionKey, inviteStore, out var cookieRole, out var cookieUser))
+            RouteHandlers.TryValidateSessionCookie(sessionCookie, sessionKey, inviteStore, out var cookieRole, out var cookieUser, out var cookieInviteId))
         {
             ctx.Items["fb.role"] = cookieRole;
             ctx.Items["fb.user"] = cookieUser;
             authenticated = true;
+
+            // Track session for active sessions dashboard
+            if (cookieInviteId is not null && inviteStore.TryGet(cookieInviteId, out var cookieInvite))
+                sessionRegistry.Touch(cookieInviteId, cookieInvite!.FriendlyName, cookieRole!, ip, "cookie");
         }
 
         if (authenticated)
@@ -853,6 +865,10 @@ app.MapGet("/admin/config",                 handlers.GetAdminConfig);
 
 // ── Admin: audit log viewer ────────────────────────────────────────────────────
 app.MapGet("/admin/audit",                  handlers.GetAuditLog);
+
+// ── Admin: active sessions dashboard ──────────────────────────────────────────
+app.MapGet("/admin/sessions",                       handlers.GetAdminSessions);
+app.MapPost("/admin/sessions/{id}/revoke",          handlers.RevokeSession);
 
 // ── Admin: invite management ───────────────────────────────────────────────────
 app.MapPost("/admin/invites",               (Delegate)handlers.CreateInvite);

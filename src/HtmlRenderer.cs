@@ -78,7 +78,7 @@ public static class HtmlRenderer
     /// Pass <paramref name="showHome"/> = true when rendering an alternate view (my-uploads, admin/uploads)
     /// so users can navigate back to the main file listing.
     /// </summary>
-    public static string BuildNavLinks(string role, bool perSender, bool separateUploadDir, bool showHome = false, bool isReadOnly = false, bool hasInvites = false, bool hasConfig = false, bool hasAuditLog = false)
+    public static string BuildNavLinks(string role, bool perSender, bool separateUploadDir, bool showHome = false, bool isReadOnly = false, bool hasInvites = false, bool hasConfig = false, bool hasAuditLog = false, bool hasSessions = false)
     {
         const string sep  = """<span style="color:#444">·</span>""";
         const string style = "font-size:0.82rem;color:#aaa;white-space:nowrap";
@@ -118,6 +118,11 @@ public static class HtmlRenderer
         {
             if (sb.Length > 0) sb.Append(sep);
             sb.Append($"""<a href="/admin/audit" style="{style}">Audit&nbsp;Log</a>""");
+        }
+        if (role == "admin" && hasSessions)
+        {
+            if (sb.Length > 0) sb.Append(sep);
+            sb.Append($"""<a href="/admin/sessions" style="{style}">Sessions</a>""");
         }
         return sb.ToString();
     }
@@ -1106,4 +1111,116 @@ nav a{font-size:.82rem;color:#aaa;white-space:nowrap}
         ".cs" or ".py" or ".js" or ".ts" or ".json"        => "💻",
         _                                                  => "📦"
     };
+
+    /// <summary>
+    /// Renders the admin active sessions dashboard as a self-contained HTML document.
+    /// Each row shows the invite name, role, IP, auth method, and last-seen time with a Revoke button.
+    /// The page auto-refreshes every 30 seconds.
+    /// </summary>
+    public static string RenderSessionsAdmin(
+        IReadOnlyList<SessionInfo> sessions,
+        string navLinks  = "",
+        string csrfToken = "")
+    {
+        var sb  = new StringBuilder();
+        var now = DateTimeOffset.UtcNow;
+
+        sb.Append("<!DOCTYPE html><html lang=\"en\"><head>\n");
+        sb.Append("<meta charset=\"UTF-8\">\n");
+        sb.Append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n");
+        sb.Append("<meta http-equiv=\"refresh\" content=\"30\">\n");
+        sb.Append("<title>FileBeam \u2014 Sessions</title>\n");
+        sb.Append("""
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f1117;color:#e0e0e0;min-height:100vh;padding:2rem}
+a{color:#5ba4f5;text-decoration:none}a:hover{text-decoration:underline}
+header{display:flex;align-items:center;gap:1rem;margin-bottom:1.75rem}
+header h1{font-size:1.4rem;font-weight:700;color:#5ba4f5}
+.section{background:#1a1d27;border-radius:8px;padding:1.25rem 1.5rem;margin-bottom:1.5rem}
+.section-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem}
+.section-hdr h2{font-size:1rem;font-weight:600;color:#aaa;text-transform:uppercase;letter-spacing:.05em}
+.section-meta{font-size:.78rem;color:#555}
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:600px}
+thead tr{background:#222536}
+th{text-align:left;padding:.6rem .85rem;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:#888;font-weight:600;white-space:nowrap}
+td{padding:.55rem .85rem;font-size:.85rem;border-top:1px solid #252836;vertical-align:middle}
+tr:hover td{background:#20233a}
+.empty-msg{color:#555;padding:1.5rem 0;text-align:center;font-size:.9rem}
+.role-badge{display:inline-block;padding:.15rem .55rem;border-radius:4px;font-size:.78rem;font-weight:600;background:#252836;color:#aaa}
+.role-rw{background:#1a2a1a;color:#4ade80}
+.role-ro{background:#1a1f2a;color:#60a5fa}
+.role-wo{background:#2a2a1a;color:#facc15}
+.method-badge{display:inline-block;padding:.1rem .45rem;border-radius:3px;font-size:.78rem;font-weight:600;font-family:monospace;background:#252836;color:#888}
+.btn-revoke{background:#2a1a1a;border:1px solid #5a2020;color:#f87171;font-size:.78rem;padding:.2rem .6rem;border-radius:4px;cursor:pointer}
+.btn-revoke:hover{background:#3a1a1a;border-color:#f87171}
+nav a{font-size:.82rem;color:#aaa;white-space:nowrap}
+</style>
+</head>
+""");
+
+        sb.Append("<body>\n");
+        sb.Append("<header>\n");
+        sb.Append("  <h1>\u26a1 FileBeam</h1>\n");
+        sb.Append($"  <nav style=\"display:flex;align-items:center;gap:.75rem;margin-left:1rem\">{navLinks}</nav>\n");
+        sb.Append("</header>\n");
+
+        sb.Append("<div class=\"section\">\n");
+        sb.Append("<div class=\"section-hdr\">");
+        sb.Append("<h2>Active Sessions</h2>");
+        sb.Append($"<span class=\"section-meta\">{sessions.Count} active &middot; refreshes every 30s</span>");
+        sb.Append("</div>\n");
+
+        if (sessions.Count == 0)
+        {
+            sb.Append("<p class=\"empty-msg\">No active invite sessions.</p>\n");
+        }
+        else
+        {
+            sb.Append("<div class=\"tbl-wrap\">\n");
+            sb.Append("<table>\n");
+            sb.Append("<thead><tr><th>Invite</th><th>Role</th><th>IP</th><th>Method</th><th>Last Seen</th><th></th></tr></thead>\n");
+            sb.Append("<tbody>\n");
+
+            foreach (var s in sessions)
+            {
+                var name        = HttpUtility.HtmlEncode(s.InviteName);
+                var roleCls     = s.Role switch { "rw" => "role-rw", "ro" => "role-ro", "wo" => "role-wo", _ => "" };
+                var roleLabel   = HttpUtility.HtmlEncode(s.Role);
+                var ip          = HttpUtility.HtmlEncode(s.Ip);
+                var method      = HttpUtility.HtmlEncode(s.AuthMethod);
+                var elapsed     = now - s.LastSeen;
+                var lastSeen    = elapsed.TotalSeconds < 60
+                    ? $"{(int)elapsed.TotalSeconds}s ago"
+                    : elapsed.TotalMinutes < 60
+                        ? $"{(int)elapsed.TotalMinutes}m ago"
+                        : $"{(int)elapsed.TotalHours}h ago";
+                var inviteIdEnc = Uri.EscapeDataString(s.InviteId);
+                var csrfEnc     = HttpUtility.HtmlAttributeEncode(csrfToken);
+
+                sb.AppendLine($"""
+    <tr>
+      <td style="font-family:monospace;font-size:.82rem">{name}</td>
+      <td><span class="role-badge {roleCls}">{roleLabel}</span></td>
+      <td style="color:#aaa;font-size:.82rem">{ip}</td>
+      <td><span class="method-badge">{method}</span></td>
+      <td style="color:#888;font-size:.82rem;white-space:nowrap">{lastSeen}</td>
+      <td style="text-align:right">
+        <form method="post" action="/admin/sessions/{inviteIdEnc}/revoke" style="display:inline">
+          <input type="hidden" name="_csrf" value="{csrfEnc}">
+          <button class="btn-revoke">Revoke</button>
+        </form>
+      </td>
+    </tr>
+""");
+            }
+
+            sb.Append("</tbody>\n</table>\n</div>\n");
+        }
+
+        sb.Append("</div>\n");
+        sb.Append("</body></html>\n");
+        return sb.ToString();
+    }
 }

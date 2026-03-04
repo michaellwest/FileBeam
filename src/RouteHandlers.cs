@@ -101,7 +101,8 @@ public class RouteHandlers(
     string cliCommand = "",
     string? auditLogPath = null,
     TimeSpan? uploadTtl = null,
-    string? adminExemptPath = null)
+    string? adminExemptPath = null,
+    SessionRegistry? sessionRegistry = null)
 {
     // Tracks cumulative bytes uploaded per sender key (IP or username).
     // Best-effort only — not atomic across concurrent uploads from the same sender.
@@ -114,7 +115,8 @@ public class RouteHandlers(
     // In-memory share token store: token → (resolved file path, expiry, creator username).
     private readonly ConcurrentDictionary<string, (string FilePath, DateTimeOffset Expiry, string Creator)> _shareTokens = new();
 
-    private bool HasAuditLog => !string.IsNullOrEmpty(auditLogPath) && auditLogPath != "-";
+    private bool HasAuditLog    => !string.IsNullOrEmpty(auditLogPath) && auditLogPath != "-";
+    private bool HasSessions    => sessionRegistry is not null;
 
     private string SafeResolvePath(string? subpath)
     {
@@ -299,7 +301,7 @@ public class RouteHandlers(
 
         bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
         bool hasConfig = role == "admin" && configJson.Length > 0;
-        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, isReadOnly: isReadOnly, hasInvites: inviteStore is not null, hasConfig: hasConfig, hasAuditLog: HasAuditLog);
+        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, isReadOnly: isReadOnly, hasInvites: inviteStore is not null, hasConfig: hasConfig, hasAuditLog: HasAuditLog, hasSessions: HasSessions);
         var adminModal = hasConfig ? HtmlRenderer.BuildAdminConfigModal(configJson, cliCommand) : "";
         var html = HtmlRenderer.RenderDirectory(relPath, dirs.ToList(), files.ToList(), isReadOnly, csrfToken, sort, order, role,
             separateUploadDir: separateDir, navLinks: navLinks, perSender: perSender, adminConfigModal: adminModal);
@@ -364,7 +366,7 @@ public class RouteHandlers(
             _      => desc ? files.OrderByDescending(f => f.Name)          : files.OrderBy(f => f.Name)
         };
 
-        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, showHome: true, isReadOnly: isReadOnly, hasInvites: inviteStore is not null);
+        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, showHome: true, isReadOnly: isReadOnly, hasInvites: inviteStore is not null, hasSessions: HasSessions);
         // Pass separateUploadDir:false so the upload form is rendered (files DO land in uploadDir here)
         var html = HtmlRenderer.RenderDirectory(relPath, dirs.ToList(), files.ToList(), isReadOnly, csrfToken, sort, order, role,
             separateUploadDir: false, urlBase: "upload-area", navLinks: navLinks, perSender: perSender, uploadTtl: uploadTtl);
@@ -971,8 +973,40 @@ public class RouteHandlers(
 
         bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
         var navLinks = HtmlRenderer.BuildNavLinks("admin", perSender, separateDir, showHome: true,
-            hasInvites: inviteStore is not null, hasAuditLog: true);
+            hasInvites: inviteStore is not null, hasAuditLog: true, hasSessions: HasSessions);
         return Results.Content(HtmlRenderer.RenderAuditLog(entries, navLinks), "text/html");
+    }
+
+    // GET /admin/sessions  — active invite sessions dashboard (admin only)
+    public IResult GetAdminSessions(HttpContext ctx)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        var sessions = sessionRegistry is not null && inviteStore is not null
+            ? sessionRegistry.GetActive(inviteStore)
+            : Array.Empty<SessionInfo>();
+
+        bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
+        var navLinks = HtmlRenderer.BuildNavLinks("admin", perSender, separateDir, showHome: true,
+            hasInvites: inviteStore is not null, hasAuditLog: HasAuditLog, hasSessions: true);
+        return Results.Content(HtmlRenderer.RenderSessionsAdmin(sessions, navLinks, csrfToken), "text/html");
+    }
+
+    // POST /admin/sessions/{id}/revoke  — revoke an invite and clear its sessions (admin only)
+    public IResult RevokeSession(HttpContext ctx, string id)
+    {
+        if (GetRole(ctx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (inviteStore is null)
+            return Results.StatusCode(StatusCodes.Status501NotImplemented);
+
+        if (!inviteStore.Revoke(id))
+            return Results.NotFound($"Invite '{id}' not found.");
+
+        sessionRegistry?.RemoveByInvite(id);
+        return Results.Redirect("/admin/sessions");
     }
 
     private static AuditEntry? TryParseAuditEntry(string line)
@@ -1136,7 +1170,7 @@ public class RouteHandlers(
 
         var baseUrl      = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
         bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
-        var navLinks     = HtmlRenderer.BuildNavLinks("admin", perSender, separateDir, showHome: true, hasInvites: true, hasAuditLog: HasAuditLog);
+        var navLinks     = HtmlRenderer.BuildNavLinks("admin", perSender, separateDir, showHome: true, hasInvites: true, hasAuditLog: HasAuditLog, hasSessions: HasSessions);
         var html         = HtmlRenderer.RenderInvitesAdmin(inviteStore.GetAll(), csrfToken, baseUrl, navLinks);
         return Results.Content(html, "text/html");
     }
@@ -1213,7 +1247,7 @@ public class RouteHandlers(
                     using var doc      = JsonDocument.Parse(payloadBytes);
                     var existingTokenId = doc.RootElement.GetProperty("tokenId").GetString();
                     if (existingTokenId == token &&
-                        TryValidateSessionCookie(existingCookie, sessionKey, inviteStore, out _, out _))
+                        TryValidateSessionCookie(existingCookie, sessionKey, inviteStore, out _, out _, out _))
                     {
                         inviteStore.TryGet(token, out invite);
                     }
@@ -1321,10 +1355,12 @@ public class RouteHandlers(
         byte[]       sessionKey,
         InviteStore? inviteStore,
         out string?  role,
-        out string?  user)
+        out string?  user,
+        out string?  inviteId)
     {
-        role = null;
-        user = null;
+        role     = null;
+        user     = null;
+        inviteId = null;
 
         var dot = cookieValue.LastIndexOf('.');
         if (dot < 0) return false;
@@ -1366,8 +1402,9 @@ public class RouteHandlers(
                 if (!invite!.IsActive) return false;
                 if (invite.ExpiresAt.HasValue && invite.ExpiresAt.Value < DateTimeOffset.UtcNow) return false;
 
-                role = invite.Role;           // use live role — may have been edited since issue
-                user = $"invite:{invite.Id}";
+                role     = invite.Role;           // use live role — may have been edited since issue
+                user     = $"invite:{invite.Id}";
+                inviteId = invite.Id;
             }
             else
             {
@@ -1470,7 +1507,7 @@ public class RouteHandlers(
         };
 
         bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
-        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, showHome: true, hasInvites: inviteStore is not null);
+        var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, showHome: true, hasInvites: inviteStore is not null, hasSessions: HasSessions);
         // Admin's own view: their entire subfolder is exempt from expiry
         var myAdminExemptPath = (perSender && role == "admin") ? adminExemptPath : null;
         var html = HtmlRenderer.RenderDirectory(
@@ -1986,7 +2023,7 @@ public class RouteHandlers(
         };
 
         bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
-        var navLinks = HtmlRenderer.BuildNavLinks("admin", perSender, separateDir, showHome: true, hasInvites: inviteStore is not null, hasAuditLog: HasAuditLog);
+        var navLinks = HtmlRenderer.BuildNavLinks("admin", perSender, separateDir, showHome: true, hasInvites: inviteStore is not null, hasAuditLog: HasAuditLog, hasSessions: HasSessions);
         var html = HtmlRenderer.RenderDirectory(
             relPath, dirs.ToList(), files.ToList(),
             isReadOnly: true,

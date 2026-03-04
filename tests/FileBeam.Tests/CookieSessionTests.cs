@@ -39,7 +39,7 @@ public sealed class CookieSessionTests
         var invite = store.Create("Alice", "rw", null, "admin");
         var cookie = BuildCookie(TestKey, invite.Id, invite.Role);
 
-        var result = RouteHandlers.TryValidateSessionCookie(cookie, TestKey, store, out var role, out var user);
+        var result = RouteHandlers.TryValidateSessionCookie(cookie, TestKey, store, out var role, out var user, out _);
 
         Assert.True(result);
         Assert.Equal("rw", role);
@@ -54,7 +54,7 @@ public sealed class CookieSessionTests
         var invite  = store.Create("Bob", "ro", expiry, "admin");
         var cookie  = BuildCookie(TestKey, invite.Id, invite.Role, expiry.ToUnixTimeSeconds());
 
-        Assert.True(RouteHandlers.TryValidateSessionCookie(cookie, TestKey, store, out _, out _));
+        Assert.True(RouteHandlers.TryValidateSessionCookie(cookie, TestKey, store, out _, out _, out _));
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public sealed class CookieSessionTests
 
         store.Edit(invite.Id, null, "ro", null);
 
-        RouteHandlers.TryValidateSessionCookie(cookie, TestKey, store, out var role, out _);
+        RouteHandlers.TryValidateSessionCookie(cookie, TestKey, store, out var role, out _, out _);
         Assert.Equal("ro", role);   // live store role wins
     }
 
@@ -80,11 +80,12 @@ public sealed class CookieSessionTests
         var invite = store.Create("Alice", "rw", null, "admin");
         var cookie = BuildCookie(TestKey, invite.Id, invite.Role);
 
-        // Flip the last character of the signature segment
-        var last = cookie[^1];
-        var tampered = cookie[..^1] + (last == 'A' ? 'B' : 'A');
+        // Flip the first character of the signature segment (avoids base64 padding-bit edge case on last char)
+        var dot     = cookie.LastIndexOf('.');
+        var sigFirst = cookie[dot + 1];
+        var tampered = cookie[..(dot + 1)] + (sigFirst == 'A' ? 'B' : 'A') + cookie[(dot + 2)..];
 
-        Assert.False(RouteHandlers.TryValidateSessionCookie(tampered, TestKey, store, out _, out _));
+        Assert.False(RouteHandlers.TryValidateSessionCookie(tampered, TestKey, store, out _, out _, out _));
     }
 
     [Fact]
@@ -95,7 +96,7 @@ public sealed class CookieSessionTests
         var cookie     = BuildCookie(TestKey, invite.Id, invite.Role);
         var wrongKey   = RandomNumberGenerator.GetBytes(32);
 
-        Assert.False(RouteHandlers.TryValidateSessionCookie(cookie, wrongKey, store, out _, out _));
+        Assert.False(RouteHandlers.TryValidateSessionCookie(cookie, wrongKey, store, out _, out _, out _));
     }
 
     // ── Malformed cookie ───────────────────────────────────────────────────────
@@ -103,19 +104,19 @@ public sealed class CookieSessionTests
     [Fact]
     public void NoDot_ReturnsFalse()
     {
-        Assert.False(RouteHandlers.TryValidateSessionCookie("nodothere", TestKey, null, out _, out _));
+        Assert.False(RouteHandlers.TryValidateSessionCookie("nodothere", TestKey, null, out _, out _, out _));
     }
 
     [Fact]
     public void EmptyString_ReturnsFalse()
     {
-        Assert.False(RouteHandlers.TryValidateSessionCookie("", TestKey, null, out _, out _));
+        Assert.False(RouteHandlers.TryValidateSessionCookie("", TestKey, null, out _, out _, out _));
     }
 
     [Fact]
     public void InvalidBase64Signature_ReturnsFalse()
     {
-        Assert.False(RouteHandlers.TryValidateSessionCookie("validpayload.!!!notbase64", TestKey, null, out _, out _));
+        Assert.False(RouteHandlers.TryValidateSessionCookie("validpayload.!!!notbase64", TestKey, null, out _, out _, out _));
     }
 
     // ── Revoked / inactive token ───────────────────────────────────────────────
@@ -129,7 +130,7 @@ public sealed class CookieSessionTests
 
         store.Revoke(invite.Id);
 
-        Assert.False(RouteHandlers.TryValidateSessionCookie(cookie, TestKey, store, out _, out _));
+        Assert.False(RouteHandlers.TryValidateSessionCookie(cookie, TestKey, store, out _, out _, out _));
     }
 
     // ── Expired cookie / token ─────────────────────────────────────────────────
@@ -143,7 +144,7 @@ public sealed class CookieSessionTests
         var pastUnix = DateTimeOffset.UtcNow.AddSeconds(-5).ToUnixTimeSeconds();
         var cookie   = BuildCookie(TestKey, invite.Id, invite.Role, pastUnix);
 
-        Assert.False(RouteHandlers.TryValidateSessionCookie(cookie, TestKey, store, out _, out _));
+        Assert.False(RouteHandlers.TryValidateSessionCookie(cookie, TestKey, store, out _, out _, out _));
     }
 
     [Fact]
@@ -155,7 +156,7 @@ public sealed class CookieSessionTests
         // Cookie itself has no expiry (simulate: cookie was issued before expiry was edited)
         var cookie = BuildCookie(TestKey, invite.Id, invite.Role);
 
-        Assert.False(RouteHandlers.TryValidateSessionCookie(cookie, TestKey, store, out _, out _));
+        Assert.False(RouteHandlers.TryValidateSessionCookie(cookie, TestKey, store, out _, out _, out _));
     }
 
     // ── Missing token in store ─────────────────────────────────────────────────
@@ -166,7 +167,7 @@ public sealed class CookieSessionTests
         var store  = new InviteStore(); // token never added
         var cookie = BuildCookie(TestKey, "doesnotexist12", "rw");
 
-        Assert.False(RouteHandlers.TryValidateSessionCookie(cookie, TestKey, store, out _, out _));
+        Assert.False(RouteHandlers.TryValidateSessionCookie(cookie, TestKey, store, out _, out _, out _));
     }
 
     // ── No invite store (cookie-only validation) ───────────────────────────────
@@ -176,7 +177,7 @@ public sealed class CookieSessionTests
     {
         var cookie = BuildCookie(TestKey, "anyid", "rw");
 
-        var result = RouteHandlers.TryValidateSessionCookie(cookie, TestKey, inviteStore: null, out var role, out var user);
+        var result = RouteHandlers.TryValidateSessionCookie(cookie, TestKey, inviteStore: null, out var role, out var user, out _);
 
         Assert.True(result);
         Assert.Equal("rw", role);
@@ -189,7 +190,7 @@ public sealed class CookieSessionTests
         var pastUnix = DateTimeOffset.UtcNow.AddSeconds(-10).ToUnixTimeSeconds();
         var cookie   = BuildCookie(TestKey, "anyid", "rw", pastUnix);
 
-        Assert.False(RouteHandlers.TryValidateSessionCookie(cookie, TestKey, inviteStore: null, out _, out _));
+        Assert.False(RouteHandlers.TryValidateSessionCookie(cookie, TestKey, inviteStore: null, out _, out _, out _));
     }
 
     // ── JoinWithInvite — session stays valid after cap ─────────────────────────
@@ -207,7 +208,7 @@ public sealed class CookieSessionTests
         store.TryRedeem(invite.Id);
 
         // The session cookie issued during that redemption must still be valid.
-        Assert.True(RouteHandlers.TryValidateSessionCookie(cookie, TestKey, store, out _, out _));
+        Assert.True(RouteHandlers.TryValidateSessionCookie(cookie, TestKey, store, out _, out _, out _));
     }
 
     [Fact]

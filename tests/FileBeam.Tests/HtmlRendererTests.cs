@@ -589,4 +589,70 @@ public sealed class InvitesAdminPageTests
         Assert.DoesNotContain("cfg-modal", html);
         Assert.DoesNotContain("openConfigModal", html);
     }
+
+    // ── BuildNavLinks — Sessions link ─────────────────────────────────────────
+
+    [Fact]
+    public void BuildNavLinks_Admin_IncludesSessionsLink_WhenHasSessions()
+    {
+        var nav = HtmlRenderer.BuildNavLinks("admin", false, false, hasSessions: true);
+
+        Assert.Contains("/admin/sessions", nav);
+        Assert.Contains("Sessions", nav);
+    }
+
+    [Fact]
+    public void BuildNavLinks_NonAdmin_DoesNotIncludeSessionsLink()
+    {
+        var nav = HtmlRenderer.BuildNavLinks("rw", false, false, hasSessions: true);
+
+        Assert.DoesNotContain("/admin/sessions", nav);
+    }
+
+    [Fact]
+    public void BuildNavLinks_Admin_NoSessionsLink_WhenHasSessionsFalse()
+    {
+        var nav = HtmlRenderer.BuildNavLinks("admin", false, false, hasSessions: false);
+
+        Assert.DoesNotContain("/admin/sessions", nav);
+    }
+
+    // ── RenderSessionsAdmin ───────────────────────────────────────────────────
+
+    [Fact]
+    public void RenderSessionsAdmin_EmptyList_ShowsEmptyMessage()
+    {
+        var html = HtmlRenderer.RenderSessionsAdmin(Array.Empty<SessionInfo>(), navLinks: "", csrfToken: "tok");
+
+        Assert.Contains("No active invite sessions", html);
+        Assert.Contains("Sessions", html);
+    }
+
+    [Fact]
+    public void RenderSessionsAdmin_ShowsSessionRows()
+    {
+        var sessions = new[]
+        {
+            new SessionInfo("abc123", "Alice", "rw", "10.0.0.1", "bearer", DateTimeOffset.UtcNow)
+        };
+
+        var html = HtmlRenderer.RenderSessionsAdmin(sessions, navLinks: "", csrfToken: "mytok");
+
+        Assert.Contains("Alice", html);
+        Assert.Contains("rw", html);
+        Assert.Contains("10.0.0.1", html);
+        Assert.Contains("bearer", html);
+        Assert.Contains("mytok", html);
+        Assert.Contains("/admin/sessions/abc123/revoke", html);
+        Assert.Contains("Revoke", html);
+    }
+
+    [Fact]
+    public void RenderSessionsAdmin_IncludesAutoRefreshMeta()
+    {
+        var html = HtmlRenderer.RenderSessionsAdmin(Array.Empty<SessionInfo>());
+
+        Assert.Contains("refresh", html);
+        Assert.Contains("30", html);
+    }
 }
