@@ -196,8 +196,9 @@ public class FileBeamConfigTests
     }
 
     [Fact]
-    public void ToCliCommand_TlsPfxWithPassword_IncludesBothFlags()
+    public void ToCliCommand_TlsPfxWithPassword_ExcludesPasswordFromOutput()
     {
+        // --tls-pfx-password is intentionally excluded from ToCliCommand (security — like --admin-password)
         var cmd = FileBeamConfig.ToCliCommand(
             download: "/srv", upload: "/srv", port: 8080,
             adminUsername: null, invitesFile: null,
@@ -209,7 +210,7 @@ public class FileBeamConfigTests
 
         Assert.Contains("--tls-pfx", cmd);
         Assert.Contains("/certs/server.pfx", cmd);
-        Assert.Contains("--tls-pfx-password", cmd);
-        Assert.Contains("secret", cmd);
+        Assert.DoesNotContain("--tls-pfx-password", cmd);
+        Assert.DoesNotContain("secret", cmd);
     }
 }

@@ -120,8 +120,7 @@ internal sealed class FileBeamConfig
             sb.Append($" --tls-key \"{tlsKey}\"");
         if (tlsPfx != null)
             sb.Append($" --tls-pfx \"{tlsPfx}\"");
-        if (tlsPfxPassword != null)
-            sb.Append($" --tls-pfx-password \"{tlsPfxPassword}\"");
+        // --tls-pfx-password intentionally omitted — pass via CLI flag directly
         if (shareTtl != 3600)
             sb.Append($" --share-ttl {shareTtl}");
         if (auditLog != null)
@@ -183,7 +182,7 @@ internal sealed class FileBeamConfig
             tlsCert,
             tlsKey,
             tlsPfx,
-            tlsPfxPassword,
+            tlsPfxPasswordSet = tlsPfxPassword is not null,   // value omitted — use --tls-pfx-password flag
             shareTtl,
             auditLog,
             auditLogMaxSize = auditLogMaxSize > 0 ? FormatBytes(auditLogMaxSize) : "unlimited",
