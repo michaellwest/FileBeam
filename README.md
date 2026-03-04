@@ -37,8 +37,8 @@ filebeam.exe --download "./share/download" --port 9000
 
 | Flag                   | Short  | Default              | Description                                                       |
 | ---------------------- | ------ | -------------------- | ----------------------------------------------------------------- |
-| `--download`           | `-s`   | Current directory    | Directory to browse and serve                                     |
-| `--upload`             | `-d`   | Same as `--download` | Upload destination (private; not visible to browsers)             |
+| `--download`           | `-s`   | Current directory    | Directory to browse and serve (created if missing)                |
+| `--upload`             | `-d`   | Same as `--download` | Upload destination (private; not visible to browsers; created if missing) |
 | `--port`               | `-p`   | `8080`               | Port to listen on                                                 |
 | `--admin-username`     |        | `admin`              | Username for the built-in admin account                           |
 | `--admin-password`     |        | _(auto-generated)_   | Admin password (or set `FILEBEAM_ADMIN_PASSWORD` env var)         |

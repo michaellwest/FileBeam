@@ -264,10 +264,7 @@ string serveDir = cliDownloadDir ?? (interactive
 serveDir = Path.GetFullPath(serveDir);
 
 if (!Directory.Exists(serveDir))
-{
-    AnsiConsole.MarkupLine($"[red]Directory not found:[/] {serveDir}");
-    return 1;
-}
+    Directory.CreateDirectory(serveDir);
 
 // Upload directory: where uploads land (defaults to serve dir if not specified).
 // When a separate upload dir is given, uploaded files are private — browsers only see the serve dir.
