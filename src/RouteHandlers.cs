@@ -100,7 +100,8 @@ public class RouteHandlers(
     string configJson = "",
     string cliCommand = "",
     string? auditLogPath = null,
-    TimeSpan? uploadTtl = null)
+    TimeSpan? uploadTtl = null,
+    string? adminExemptPath = null)
 {
     // Tracks cumulative bytes uploaded per sender key (IP or username).
     // Best-effort only — not atomic across concurrent uploads from the same sender.
@@ -1470,13 +1471,16 @@ public class RouteHandlers(
 
         bool separateDir = !rootDir.Equals(uploadDir, StringComparison.OrdinalIgnoreCase);
         var navLinks = HtmlRenderer.BuildNavLinks(role, perSender, separateDir, showHome: true, hasInvites: inviteStore is not null);
+        // Admin's own view: their entire subfolder is exempt from expiry
+        var myAdminExemptPath = (perSender && role == "admin") ? adminExemptPath : null;
         var html = HtmlRenderer.RenderDirectory(
             relPath, dirs.ToList(), files.ToList(),
             isReadOnly, csrfToken, sort, order, role,
             separateUploadDir: false,  // files uploaded here DO appear in this view
             urlBase: "my-uploads",
             navLinks: navLinks,
-            uploadTtl: uploadTtl);
+            uploadTtl: uploadTtl,
+            adminExemptPath: myAdminExemptPath);
         return Results.Content(html, "text/html");
     }
 
@@ -1990,7 +1994,8 @@ public class RouteHandlers(
             separateUploadDir: false,
             urlBase: "admin/uploads",
             navLinks: navLinks,
-            uploadTtl: uploadTtl);
+            uploadTtl: uploadTtl,
+            adminExemptPath: adminExemptPath);
         return Results.Content(html, "text/html");
     }
 

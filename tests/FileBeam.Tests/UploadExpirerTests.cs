@@ -36,8 +36,9 @@ public sealed class UploadExpirerTests : IDisposable
         return path;
     }
 
-    private UploadExpirer MakeExpirer(TimeSpan ttl, bool perSender = false, string adminUsername = "admin")
-        => new UploadExpirer(_uploadDir, ttl, perSender, adminUsername);
+    private UploadExpirer MakeExpirer(TimeSpan ttl, bool perSender = false, string adminUsername = "admin",
+        Action<string>? log = null)
+        => new UploadExpirer(_uploadDir, ttl, perSender, adminUsername, log);
 
     // ── Tests ─────────────────────────────────────────────────────────────────
 
@@ -164,6 +165,78 @@ public sealed class UploadExpirerTests : IDisposable
         // Dispose should complete promptly
         await expirer.DisposeAsync().AsTask().WaitAsync(cts.Token);
     }
+
+    // ── Logging tests ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public void ScanAndDelete_LogsExpir_WhenFileDeleted()
+    {
+        var logs    = new List<string>();
+        CreateOldFile("old.txt", TimeSpan.FromHours(2));
+        var expirer = MakeExpirer(TimeSpan.FromHours(1), log: logs.Add);
+
+        expirer.ScanAndDelete();
+
+        Assert.Single(logs);
+        Assert.StartsWith("[EXPIR]", logs[0]);
+        Assert.Contains("old.txt", logs[0]);
+    }
+
+    [Fact]
+    public void ScanAndDelete_LogsSkip_WhenAdminExemptFilePastTtl()
+    {
+        var logs = new List<string>();
+        CreateOldFile("admin/old.txt", TimeSpan.FromHours(2));
+        var expirer = MakeExpirer(TimeSpan.FromHours(1), perSender: true, adminUsername: "admin", log: logs.Add);
+
+        expirer.ScanAndDelete();
+
+        Assert.Single(logs);
+        Assert.StartsWith("[SKIP]", logs[0]);
+        Assert.Contains("never expires", logs[0]);
+    }
+
+    [Fact]
+    public void ScanAndDelete_NoLog_WhenFreshFile()
+    {
+        var logs    = new List<string>();
+        CreateFreshFile("fresh.txt");
+        var expirer = MakeExpirer(TimeSpan.FromHours(1), log: logs.Add);
+
+        expirer.ScanAndDelete();
+
+        Assert.Empty(logs);
+    }
+
+    [Fact]
+    public void ScanAndDelete_NoLog_WhenAdminExemptFileFresh()
+    {
+        // Admin-exempt file that is NOT past TTL — should NOT log [SKIP]
+        var logs = new List<string>();
+        CreateFreshFile("admin/fresh.txt");
+        var expirer = MakeExpirer(TimeSpan.FromHours(1), perSender: true, adminUsername: "admin", log: logs.Add);
+
+        expirer.ScanAndDelete();
+
+        Assert.Empty(logs);
+    }
+
+    [Fact]
+    public void AdminSubfolder_ReturnsCorrectPath_WhenPerSenderTrue()
+    {
+        var expirer  = MakeExpirer(TimeSpan.FromHours(1), perSender: true, adminUsername: "admin");
+        var expected = Path.GetFullPath(Path.Combine(_uploadDir, "admin"));
+
+        Assert.Equal(expected, expirer.AdminSubfolder);
+    }
+
+    [Fact]
+    public void AdminSubfolder_ReturnsNull_WhenPerSenderFalse()
+    {
+        var expirer = MakeExpirer(TimeSpan.FromHours(1), perSender: false);
+
+        Assert.Null(expirer.AdminSubfolder);
+    }
 }
 
 // ── HtmlRenderer expiry column tests ─────────────────────────────────────────
@@ -256,5 +329,22 @@ public class HtmlRendererExpiryTests : IDisposable
 
         Assert.StartsWith("expired", text);
         Assert.Contains("ago", text);
+    }
+
+    [Fact]
+    public void RenderDirectory_ShowsNeverExpires_ForAdminExemptFile()
+    {
+        // File is 2h old with 1h TTL — would normally show "expired X ago"
+        // but it's inside the admin-exempt path, so should show "never expires"
+        var files = MakeFiles(("test.txt", DateTime.UtcNow - TimeSpan.FromHours(2)));
+        var adminExemptPath = _tmpDir; // all files are "admin-exempt" in this test
+
+        var html = HtmlRenderer.RenderDirectory("", [], files,
+            uploadTtl: TimeSpan.FromHours(1),
+            adminExemptPath: adminExemptPath);
+
+        Assert.Contains("never expires", html);
+        // The file row should not have a countdown td (no data-expires attribute on its td)
+        Assert.DoesNotContain("class=\"expires\" style=\"color:#e53e3e", html);
     }
 }
