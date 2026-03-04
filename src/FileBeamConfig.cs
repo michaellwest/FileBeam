@@ -25,6 +25,8 @@ internal sealed class FileBeamConfig
     [JsonPropertyName("maxUploadSize")]   public string? MaxUploadSize   { get; init; }
     [JsonPropertyName("tlsCert")]         public string? TlsCert         { get; init; }
     [JsonPropertyName("tlsKey")]          public string? TlsKey          { get; init; }
+    [JsonPropertyName("tlsPfx")]          public string? TlsPfx          { get; init; }
+    [JsonPropertyName("tlsPfxPassword")]  public string? TlsPfxPassword  { get; init; }
     [JsonPropertyName("shareTtl")]        public int?    ShareTtl        { get; init; }
     [JsonPropertyName("auditLog")]        public string? AuditLog        { get; init; }
     [JsonPropertyName("auditLogMaxSize")] public string? AuditLogMaxSize { get; init; }
@@ -80,6 +82,8 @@ internal sealed class FileBeamConfig
         long?   maxUploadSize,
         string? tlsCert,
         string? tlsKey,
+        string? tlsPfx,
+        string? tlsPfxPassword,
         int     shareTtl,
         string? auditLog,
         long    auditLogMaxSize,
@@ -114,6 +118,10 @@ internal sealed class FileBeamConfig
             sb.Append($" --tls-cert \"{tlsCert}\"");
         if (tlsKey != null)
             sb.Append($" --tls-key \"{tlsKey}\"");
+        if (tlsPfx != null)
+            sb.Append($" --tls-pfx \"{tlsPfx}\"");
+        if (tlsPfxPassword != null)
+            sb.Append($" --tls-pfx-password \"{tlsPfxPassword}\"");
         if (shareTtl != 3600)
             sb.Append($" --share-ttl {shareTtl}");
         if (auditLog != null)
@@ -147,6 +155,8 @@ internal sealed class FileBeamConfig
         long?   maxUploadSize,
         string? tlsCert,
         string? tlsKey,
+        string? tlsPfx,
+        string? tlsPfxPassword,
         int     shareTtl,
         string? auditLog,
         long    auditLogMaxSize,
@@ -172,6 +182,8 @@ internal sealed class FileBeamConfig
                                 ? FormatBytes(maxUploadSize.Value) : "unlimited",
             tlsCert,
             tlsKey,
+            tlsPfx,
+            tlsPfxPassword,
             shareTtl,
             auditLog,
             auditLogMaxSize = auditLogMaxSize > 0 ? FormatBytes(auditLogMaxSize) : "unlimited",

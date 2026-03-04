@@ -27,6 +27,8 @@ long    maxUploadTotal      = 0;   // total upload directory cap; 0 = unlimited
 long?   maxUploadSize       = null; // null = keep large default; 0 = unlimited
 string? cliTlsCert          = null;
 string? cliTlsKey           = null;
+string? cliTlsPfx           = null;
+string? cliTlsPfxPassword   = null;
 string? auditLogPath        = null;
 long    auditLogMaxSize     = 0;
 int     shareTtl            = 3600; // default share link TTL in seconds
@@ -89,6 +91,10 @@ for (int i = 0; i < args.Length; i++)
         cliTlsCert = args[++i];
     else if (args[i] == "--tls-key" && i + 1 < args.Length)
         cliTlsKey = args[++i];
+    else if (args[i] == "--tls-pfx" && i + 1 < args.Length)
+        cliTlsPfx = args[++i];
+    else if (args[i] == "--tls-pfx-password" && i + 1 < args.Length)
+        cliTlsPfxPassword = args[++i];
     else if (args[i] == "--share-ttl" && i + 1 < args.Length)
         shareTtl = int.TryParse(args[++i], out var st) && st > 0 ? st : 3600;
     else if (args[i] == "--audit-log" && i + 1 < args.Length)
@@ -146,6 +152,8 @@ for (int i = 0; i < args.Length; i++)
         cliPerSender      ??= cfg!.PerSender;
         cliTlsCert        ??= cfg!.TlsCert;
         cliTlsKey         ??= cfg!.TlsKey;
+        cliTlsPfx         ??= cfg!.TlsPfx;
+        cliTlsPfxPassword ??= cfg!.TlsPfxPassword;
 
         if (maxFileSize == 0    && cfg!.MaxFileSize    is not null
             && TryParseSize(cfg.MaxFileSize,    out var cfgMF))  maxFileSize    = cfgMF;
@@ -299,9 +307,18 @@ if (adminPasswordGenerated)
         $"[yellow bold]Admin password auto-generated:[/] {Markup.Escape(adminPassword)}\n" +
         $"[grey]Saved to: {Markup.Escape(adminKeyFilePath)}[/]\n");
 
-// ── Validate TLS cert/key (optional) ──────────────────────────────────────────
+// ── Validate TLS cert/key or PFX (optional, mutually exclusive) ───────────────
 X509Certificate2? tlsCertificate = null;
-if (cliTlsCert != null || cliTlsKey != null)
+bool hasPem = cliTlsCert != null || cliTlsKey != null;
+bool hasPfx = cliTlsPfx  != null;
+
+if (hasPem && hasPfx)
+{
+    AnsiConsole.MarkupLine("[red]Error:[/] --tls-cert/--tls-key and --tls-pfx are mutually exclusive. Use one or the other.");
+    return 1;
+}
+
+if (hasPem)
 {
     if (cliTlsCert is null || cliTlsKey is null)
     {
@@ -340,6 +357,33 @@ if (cliTlsCert != null || cliTlsKey != null)
         return 1;
     }
 }
+else if (hasPfx)
+{
+    var absPfx = Path.GetFullPath(cliTlsPfx!);
+
+    if (!File.Exists(absPfx))
+    {
+        AnsiConsole.MarkupLine($"[red]Error:[/] --tls-pfx file not found: {Markup.Escape(absPfx)}");
+        return 1;
+    }
+    try { _ = File.ReadAllBytes(absPfx); }
+    catch (Exception ex)
+    {
+        AnsiConsole.MarkupLine($"[red]Error:[/] cannot read --tls-pfx: {Markup.Escape(ex.Message)}");
+        return 1;
+    }
+
+    // LoadPkcs12FromFile registers the key with Windows CNG directly — no round-trip needed.
+    try
+    {
+        tlsCertificate = X509CertificateLoader.LoadPkcs12FromFile(absPfx, cliTlsPfxPassword);
+    }
+    catch (Exception ex)
+    {
+        AnsiConsole.MarkupLine($"[red]Error:[/] failed to load TLS PFX certificate: {Markup.Escape(ex.Message)}");
+        return 1;
+    }
+}
 
 // ── --print-config: dump effective config as JSON and exit ────────────────────
 if (printConfig)
@@ -358,6 +402,8 @@ if (printConfig)
         maxUploadSize:   maxUploadSize,
         tlsCert:         cliTlsCert,
         tlsKey:          cliTlsKey,
+        tlsPfx:          cliTlsPfx,
+        tlsPfxPassword:  cliTlsPfxPassword,
         shareTtl:        shareTtl,
         auditLog:        auditLogPath,
         auditLogMaxSize: auditLogMaxSize,
@@ -516,6 +562,8 @@ var configJson = FileBeamConfig.ToDisplayJson(
     maxUploadSize:   maxUploadSize,
     tlsCert:         cliTlsCert,
     tlsKey:          cliTlsKey,
+    tlsPfx:          cliTlsPfx,
+    tlsPfxPassword:  cliTlsPfxPassword,
     shareTtl:        shareTtl,
     auditLog:        auditLogPath,
     auditLogMaxSize: auditLogMaxSize,
@@ -537,6 +585,8 @@ var cliCommand = FileBeamConfig.ToCliCommand(
     maxUploadSize:   maxUploadSize,
     tlsCert:         cliTlsCert,
     tlsKey:          cliTlsKey,
+    tlsPfx:          cliTlsPfx,
+    tlsPfxPassword:  cliTlsPfxPassword,
     shareTtl:        shareTtl,
     auditLog:        auditLogPath,
     auditLogMaxSize: auditLogMaxSize,
