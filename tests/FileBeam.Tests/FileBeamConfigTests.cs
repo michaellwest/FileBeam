@@ -12,7 +12,7 @@ public class FileBeamConfigTests
             adminUsername: null, invitesFile: null,
             readOnly: false, perSender: false,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
-            tlsCert: null, tlsKey: null,
+            tlsCert: null, tlsKey: null, tlsPfx: null, tlsPfxPassword: null,
             shareTtl: 3600, auditLog: null, auditLogMaxSize: 0,
             rateLimit: 60, logLevel: "info");
 
@@ -29,7 +29,7 @@ public class FileBeamConfigTests
             adminUsername: null, invitesFile: null,
             readOnly: false, perSender: false,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
-            tlsCert: null, tlsKey: null,
+            tlsCert: null, tlsKey: null, tlsPfx: null, tlsPfxPassword: null,
             shareTtl: 3600, auditLog: null, auditLogMaxSize: 0,
             rateLimit: 60, logLevel: "info");
 
@@ -44,7 +44,7 @@ public class FileBeamConfigTests
             adminUsername: null, invitesFile: null,
             readOnly: false, perSender: false,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
-            tlsCert: null, tlsKey: null,
+            tlsCert: null, tlsKey: null, tlsPfx: null, tlsPfxPassword: null,
             shareTtl: 3600, auditLog: null, auditLogMaxSize: 0,
             rateLimit: 60, logLevel: "info");
 
@@ -59,7 +59,7 @@ public class FileBeamConfigTests
             adminUsername: null, invitesFile: null,
             readOnly: false, perSender: false,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
-            tlsCert: null, tlsKey: null,
+            tlsCert: null, tlsKey: null, tlsPfx: null, tlsPfxPassword: null,
             shareTtl: 3600, auditLog: null, auditLogMaxSize: 0,
             rateLimit: 60, logLevel: "info");
 
@@ -74,7 +74,7 @@ public class FileBeamConfigTests
             adminUsername: null, invitesFile: null,
             readOnly: false, perSender: false,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
-            tlsCert: null, tlsKey: null,
+            tlsCert: null, tlsKey: null, tlsPfx: null, tlsPfxPassword: null,
             shareTtl: 3600, auditLog: null, auditLogMaxSize: 0,
             rateLimit: 60, logLevel: "info");
 
@@ -90,7 +90,7 @@ public class FileBeamConfigTests
             adminUsername: null, invitesFile: null,
             readOnly: true, perSender: true,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
-            tlsCert: null, tlsKey: null,
+            tlsCert: null, tlsKey: null, tlsPfx: null, tlsPfxPassword: null,
             shareTtl: 3600, auditLog: null, auditLogMaxSize: 0,
             rateLimit: 60, logLevel: "info");
 
@@ -107,7 +107,7 @@ public class FileBeamConfigTests
             adminUsername: null, invitesFile: null,
             readOnly: false, perSender: false,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
-            tlsCert: null, tlsKey: null,
+            tlsCert: null, tlsKey: null, tlsPfx: null, tlsPfxPassword: null,
             shareTtl: 3600, auditLog: null, auditLogMaxSize: 0,
             rateLimit: 60, logLevel: "info");
 
@@ -123,7 +123,7 @@ public class FileBeamConfigTests
             adminUsername: null, invitesFile: null,
             readOnly: false, perSender: false,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
-            tlsCert: null, tlsKey: null,
+            tlsCert: null, tlsKey: null, tlsPfx: null, tlsPfxPassword: null,
             shareTtl: 3600, auditLog: null, auditLogMaxSize: 0,
             rateLimit: 60, logLevel: "debug");
 
@@ -138,7 +138,7 @@ public class FileBeamConfigTests
             adminUsername: null, invitesFile: null,
             readOnly: false, perSender: false,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
-            tlsCert: null, tlsKey: null,
+            tlsCert: null, tlsKey: null, tlsPfx: null, tlsPfxPassword: null,
             shareTtl: 3600, auditLog: null, auditLogMaxSize: 0,
             rateLimit: 60, logLevel: "info");
 
@@ -153,7 +153,7 @@ public class FileBeamConfigTests
             adminUsername: "sysop", invitesFile: "/etc/invites.json",
             readOnly: false, perSender: false,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
-            tlsCert: null, tlsKey: null,
+            tlsCert: null, tlsKey: null, tlsPfx: null, tlsPfxPassword: null,
             shareTtl: 3600, auditLog: null, auditLogMaxSize: 0,
             rateLimit: 60, logLevel: "info");
 
@@ -171,10 +171,45 @@ public class FileBeamConfigTests
             adminUsername: null, invitesFile: null,
             readOnly: false, perSender: false,
             maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
-            tlsCert: null, tlsKey: null,
+            tlsCert: null, tlsKey: null, tlsPfx: null, tlsPfxPassword: null,
             shareTtl: 3600, auditLog: null, auditLogMaxSize: 0,
             rateLimit: 60, logLevel: "info");
 
         Assert.DoesNotContain("--admin-username", cmd);
+    }
+
+    [Fact]
+    public void ToCliCommand_TlsPfxNoPassword_IncludesPfxFlagOnly()
+    {
+        var cmd = FileBeamConfig.ToCliCommand(
+            download: "/srv", upload: "/srv", port: 8080,
+            adminUsername: null, invitesFile: null,
+            readOnly: false, perSender: false,
+            maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
+            tlsCert: null, tlsKey: null, tlsPfx: "/certs/server.pfx", tlsPfxPassword: null,
+            shareTtl: 3600, auditLog: null, auditLogMaxSize: 0,
+            rateLimit: 60, logLevel: "info");
+
+        Assert.Contains("--tls-pfx", cmd);
+        Assert.Contains("/certs/server.pfx", cmd);
+        Assert.DoesNotContain("--tls-pfx-password", cmd);
+    }
+
+    [Fact]
+    public void ToCliCommand_TlsPfxWithPassword_IncludesBothFlags()
+    {
+        var cmd = FileBeamConfig.ToCliCommand(
+            download: "/srv", upload: "/srv", port: 8080,
+            adminUsername: null, invitesFile: null,
+            readOnly: false, perSender: false,
+            maxFileSize: 0, maxUploadBytes: 0, maxUploadTotal: 0, maxUploadSize: null,
+            tlsCert: null, tlsKey: null, tlsPfx: "/certs/server.pfx", tlsPfxPassword: "secret",
+            shareTtl: 3600, auditLog: null, auditLogMaxSize: 0,
+            rateLimit: 60, logLevel: "info");
+
+        Assert.Contains("--tls-pfx", cmd);
+        Assert.Contains("/certs/server.pfx", cmd);
+        Assert.Contains("--tls-pfx-password", cmd);
+        Assert.Contains("secret", cmd);
     }
 }
