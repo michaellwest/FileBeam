@@ -6,7 +6,7 @@ Pick a label when you want to work on a feature (e.g. "let's do FB-04").
 
 ## Small / Self-contained
 
-### FB-01 · Invite max-uses cap
+### FB-01 · Invite max-uses cap ✅
 
 Each invite tracks browser joins and Bearer API calls independently, with optional caps on each.
 
@@ -20,7 +20,7 @@ Each invite tracks browser joins and Bearer API calls independently, with option
 
 **Future — Path B (separate token IDs):** genuinely decouple the browser join token from the Bearer API token so that sharing the join link no longer exposes API access. This eliminates the shared-ID security warning but requires a breaking change to the invite record shape, persistence format, auth middleware, and all invite endpoints. Deferred; revisit if the shared-ID concern becomes a user pain point.
 
-### FB-02 · Upload progress bar
+### FB-02 · Upload progress bar ✅
 
 Show a per-file upload progress bar in the browser UI with percentage and estimated speed. Uses `XMLHttpRequest` (already used for CSRF) instead of a plain form `POST` so that `progress` events are available. No backend changes required.
 
@@ -79,7 +79,7 @@ Console log output for every file the cleanup job touches, using AnsiConsole sty
 
 Auto-create the `--download` and `--upload` directories on startup if they do not exist, instead of exiting with an error. Uses `Directory.CreateDirectory` (idempotent, creates parent dirs). No CLI flags or config changes needed.
 
-### FB-08 · Audit log viewer
+### FB-08 · Audit log viewer ✅
 
 A read-only admin page at `GET /admin/audit` that renders the last N lines of the NDJSON audit log in a table (timestamp, action, user, file, bytes, IP, request ID). Auto-refreshes every 30 seconds. Only available when `--audit-log` is configured. No new log format changes — parses the existing NDJSON.
 
