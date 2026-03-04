@@ -19,3 +19,6 @@ share/**/*
 .claude_worklog.md
 
 *.key
+*.cert
+*.cer
+*.crt
