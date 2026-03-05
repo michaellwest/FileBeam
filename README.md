@@ -261,16 +261,33 @@ The page returns `404 Not Found` when `--audit-log` is absent or set to `-` (std
 
 #### Active sessions dashboard
 
-A **Sessions** link appears in the admin navigation bar. It opens `GET /admin/sessions`, a real-time HTML dashboard showing every invite-based session (Bearer token or cookie) that has been active within the past 30 minutes.
+A **Sessions** link appears in the admin navigation bar. It opens `GET /admin/sessions`, a real-time HTML dashboard showing every invite-based session and every active QR/auto-login bearer session.
 
-| Method | Endpoint                         | Description                                               |
-| ------ | -------------------------------- | --------------------------------------------------------- |
-| `GET`  | `/admin/sessions`                | Active invite sessions as HTML table (admin only)         |
-| `POST` | `/admin/sessions/{id}/revoke`    | Revoke the invite and clear its sessions (admin only)     |
+| Method | Endpoint                                         | Description                                                        |
+| ------ | ------------------------------------------------ | ------------------------------------------------------------------ |
+| `GET`  | `/admin/sessions`                                | Active invite + QR sessions as HTML tables (admin only)            |
+| `POST` | `/admin/sessions/{id}/revoke`                    | Revoke the invite and clear its sessions (admin only)              |
+| `POST` | `/admin/sessions/autologin/{prefix}/revoke`      | Revoke a QR/auto-login session bearer by token prefix (admin only) |
 
-**Columns:** Invite name · Role badge (color-coded) · IP · Auth method (bearer/cookie) · Last seen (relative time)
+**Invite sessions table columns:** Invite name · Role badge (color-coded) · IP · Auth method (bearer/cookie) · Last seen (relative time)
 
-Each row has a **Revoke** button that immediately deactivates the underlying invite token and removes all associated session entries. The page auto-refreshes every 30 seconds. Admin's own Basic Auth sessions are not tracked (only invite-based auth appears here).
+**QR / Auto-login sessions table columns:** IP · Issued At · Last Seen · Expires At · Revoke
+
+Each row has a **Revoke** button. For invite sessions, revoking immediately deactivates the underlying invite token and removes all associated session entries. For QR/auto-login bearer sessions, revoking invalidates the bearer token and forces re-authentication. The page auto-refreshes every 30 seconds.
+
+#### HTML login page
+
+FileBeam provides an HTML login form at `/login` as an alternative to the browser's native Basic Auth popup.
+
+- **Browser GET requests** to any protected page redirect to `/login?next={path}` instead of triggering a native Basic Auth dialog. Curl and API clients still receive `401 + WWW-Authenticate: Basic`.
+- After a successful login the session cookie is set and the browser is redirected to `next` (or `/`).
+- Brute-force lockout and the 200 ms failure delay apply to the login form.
+- Successful and failed login attempts are written to the audit log (`admin-login`, `admin-login-fail`).
+
+| Method | Endpoint  | Description                                                   |
+| ------ | --------- | ------------------------------------------------------------- |
+| `GET`  | `/login`  | Render HTML login form (unauthenticated)                      |
+| `POST` | `/login`  | Validate credentials, set session cookie (unauthenticated)    |
 
 #### Admin auto-login QR
 
@@ -283,13 +300,15 @@ Scanning the QR code → GET /auto-login/{token} → admin session cookie set �
 - The token is burned on first use (scanning again shows an error page).
 - The token expires after 5 minutes. FileBeam prints the expiry time next to the QR.
 - Disable with `--no-qr-autologin` (or `"qrAutologin": false` in `filebeam.json`) to encode the bare server URL instead.
+- QR token generation and redemption are written to the audit log (`qr-generate`, `qr-redeem`, `qr-redeem-fail`).
+- After a successful QR scan the resulting session bearer is written to the audit log (`session-bearer-issue`).
 
 While logged in, admins can regenerate a fresh QR at any time:
 
-| Method | Endpoint      | Description                                                    |
-| ------ | ------------- | -------------------------------------------------------------- |
-| `GET`  | `/auto-login/{token}` | Redeem a startup auto-login token (unauthenticated)  |
-| `GET`  | `/admin/qr`   | Generate a new auto-login QR and display it as HTML (admin only) |
+| Method | Endpoint              | Description                                                       |
+| ------ | --------------------- | ----------------------------------------------------------------- |
+| `GET`  | `/auto-login/{token}` | Redeem a startup auto-login token (unauthenticated)               |
+| `GET`  | `/admin/qr`           | Generate a new auto-login QR and display it as HTML (admin only)  |
 
 #### Upload expiry auto-delete
 

@@ -53,7 +53,12 @@ public class RouteHandlers
         SessionRegistry? sessionRegistry = null,
         int maxConcurrentZips = 2,
         long maxZipBytes = 0,
-        AutoLoginStore? autoLoginStore = null)
+        AutoLoginStore? autoLoginStore = null,
+        AuditLogger? auditLogger = null,
+        string adminUsername = "admin",
+        string adminPassword = "",
+        Func<string, bool>? isLockedOut = null,
+        Action<string, bool>? recordAuth = null)
     {
         var ctx = new HandlerContext(
             rootDir, uploadDir, watcher, isReadOnly, perSender,
@@ -62,7 +67,8 @@ public class RouteHandlers
             revocationStore, inviteStore, sessionKey, isTls, debugLog,
             configJson, cliCommand, auditLogPath, uploadTtl,
             adminExemptPath, sessionRegistry,
-            maxConcurrentZips, maxZipBytes, autoLoginStore);
+            maxConcurrentZips, maxZipBytes, autoLoginStore,
+            auditLogger, adminUsername, adminPassword, isLockedOut, recordAuth);
 
         _browse   = new BrowseHandlers(ctx);
         _download = new DownloadHandlers(ctx);
@@ -129,6 +135,9 @@ public class RouteHandlers
     public Task FileEvents(HttpContext ctx)                             => _admin.FileEvents(ctx);
     public IResult RedeemAutoLogin(HttpContext ctx, string token)      => _admin.RedeemAutoLogin(ctx, token);
     public IResult GetAdminQr(HttpContext ctx)                         => _admin.GetAdminQr(ctx);
+    public IResult GetLoginPage(HttpContext ctx)                       => _admin.GetLoginPage(ctx);
+    public Task<IResult> PostLogin(HttpContext ctx)                    => _admin.PostLogin(ctx);
+    public IResult RevokeAutoLoginBearer(HttpContext ctx, string prefix) => _admin.RevokeAutoLoginBearer(ctx, prefix);
 
     // ── Static helpers (kept for backward compatibility with Program.cs) ───────
     /// <inheritdoc cref="AdminHandlers.TryValidateSessionCookie"/>

@@ -33,7 +33,12 @@ internal sealed class HandlerContext(
     SessionRegistry? sessionRegistry = null,
     int maxConcurrentZips = 2,
     long maxZipBytes = 0,
-    AutoLoginStore? autoLoginStore = null)
+    AutoLoginStore? autoLoginStore = null,
+    AuditLogger? auditLogger = null,
+    string adminUsername = "admin",
+    string adminPassword = "",
+    Func<string, bool>? isLockedOut = null,
+    Action<string, bool>? recordAuth = null)
 {
     internal string        RootDir                  => rootDir;
     internal string        UploadDir                => uploadDir;
@@ -65,6 +70,13 @@ internal sealed class HandlerContext(
     internal int  MaxConcurrentZips => maxConcurrentZips;
     internal long MaxZipBytes       => maxZipBytes;
     internal AutoLoginStore? AutoLoginStore => autoLoginStore;
+    internal AuditLogger?    AuditLogger    => auditLogger;
+    internal string          AdminUsername  => adminUsername;
+    internal string          AdminPassword  => adminPassword;
+    /// <summary>Returns true if the given IP is currently locked out due to brute-force failures.</summary>
+    internal Func<string, bool>?      IsLockedOut => isLockedOut;
+    /// <summary>Records an auth attempt result (success=true clears failures, false increments).</summary>
+    internal Action<string, bool>?    RecordAuth  => recordAuth;
 
     /// <summary>
     /// Semaphore capping simultaneous ZIP streams. Null when <see cref="MaxConcurrentZips"/> is 0 (unlimited).

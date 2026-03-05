@@ -1177,7 +1177,8 @@ nav a{font-size:.82rem;color:#aaa;white-space:nowrap}
     public static string RenderSessionsAdmin(
         IReadOnlyList<SessionInfo> sessions,
         string navLinks  = "",
-        string csrfToken = "")
+        string csrfToken = "",
+        IReadOnlyList<(string Prefix, BearerSession Session)>? bearers = null)
     {
         var sb  = new StringBuilder();
         var now = DateTimeOffset.UtcNow;
@@ -1277,6 +1278,60 @@ nav a{font-size:.82rem;color:#aaa;white-space:nowrap}
         }
 
         sb.Append("</div>\n");
+
+        // ── QR / Auto-login bearer sessions ────────────────────────────────────
+        sb.Append("<div class=\"section\">\n");
+        sb.Append("<div class=\"section-hdr\">");
+        sb.Append("<h2>Active QR / Auto-login Sessions</h2>");
+        var bearerCount = bearers?.Count ?? 0;
+        sb.Append($"<span class=\"section-meta\">{bearerCount} active</span>");
+        sb.Append("</div>\n");
+
+        if (bearerCount == 0)
+        {
+            sb.Append("<p class=\"empty-msg\">No active QR/auto-login sessions.</p>\n");
+        }
+        else
+        {
+            sb.Append("<div class=\"tbl-wrap\">\n");
+            sb.Append("<table>\n");
+            sb.Append("<thead><tr><th>IP</th><th>Issued At</th><th>Last Seen</th><th>Expires At</th><th></th></tr></thead>\n");
+            sb.Append("<tbody>\n");
+
+            foreach (var (prefix, session) in bearers!)
+            {
+                var bIp      = HttpUtility.HtmlEncode(session.Ip);
+                var bIssued  = session.IssuedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+                var bElapsed = now - session.LastSeen;
+                var bLastSeen = bElapsed.TotalSeconds < 60
+                    ? $"{(int)bElapsed.TotalSeconds}s ago"
+                    : bElapsed.TotalMinutes < 60
+                        ? $"{(int)bElapsed.TotalMinutes}m ago"
+                        : $"{(int)bElapsed.TotalHours}h ago";
+                var bExpiry  = session.ExpiresAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+                var prefixEnc = Uri.EscapeDataString(prefix);
+                var csrfEnc   = HttpUtility.HtmlAttributeEncode(csrfToken);
+
+                sb.AppendLine($"""
+    <tr>
+      <td style="color:#aaa;font-size:.82rem">{bIp}</td>
+      <td style="color:#888;font-size:.82rem;white-space:nowrap">{bIssued}</td>
+      <td style="color:#888;font-size:.82rem;white-space:nowrap">{bLastSeen}</td>
+      <td style="color:#888;font-size:.82rem;white-space:nowrap">{bExpiry}</td>
+      <td style="text-align:right">
+        <form method="post" action="/admin/sessions/autologin/{prefixEnc}/revoke" style="display:inline">
+          <input type="hidden" name="_csrf" value="{csrfEnc}">
+          <button class="btn-revoke">Revoke</button>
+        </form>
+      </td>
+    </tr>
+""");
+            }
+
+            sb.Append("</tbody>\n</table>\n</div>\n");
+        }
+
+        sb.Append("</div>\n");
         sb.Append(BuildAuthNavScript());
         sb.Append("</body></html>\n");
         return sb.ToString();
@@ -1319,6 +1374,63 @@ nav a{font-size:.82rem;color:#aaa;white-space:nowrap}
                "</div>\n" +
                BuildAuthNavScript() +
                "</body></html>\n";
+    }
+
+    /// <summary>
+    /// Renders a minimal centered login card for admin credential entry.
+    /// </summary>
+    /// <param name="csrfToken">CSRF token embedded as a hidden form field.</param>
+    /// <param name="error">Error message to display, or null for no error.</param>
+    /// <param name="next">URL to redirect to after a successful login, or null for /.</param>
+    public static string RenderLoginPage(string csrfToken, string? error, string? next)
+    {
+        var errorHtml = error is not null
+            ? $"<div class=\"err\">{HttpUtility.HtmlEncode(error)}</div>\n"
+            : "";
+        var nextHtml = !string.IsNullOrEmpty(next)
+            ? $"<input type=\"hidden\" name=\"next\" value=\"{HttpUtility.HtmlAttributeEncode(next)}\">\n"
+            : "";
+        var csrfEsc = HttpUtility.HtmlAttributeEncode(csrfToken);
+
+        return
+            "<!DOCTYPE html><html lang=\"en\"><head>\n" +
+            "<meta charset=\"UTF-8\">\n" +
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n" +
+            "<title>Sign In \u2014 FileBeam</title>\n" +
+            "<style>\n" +
+            "*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}\n" +
+            "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;" +
+            "background:#0f1117;color:#e0e0e0;min-height:100vh;" +
+            "display:flex;align-items:center;justify-content:center;padding:1rem}\n" +
+            ".card{background:#1a1d27;border-radius:10px;padding:2rem 2.5rem;width:100%;max-width:360px}\n" +
+            "h1{font-size:1.3rem;font-weight:700;color:#5ba4f5;margin-bottom:1.5rem}\n" +
+            "label{display:block;font-size:.8rem;color:#888;margin-bottom:.3rem;margin-top:1rem}\n" +
+            "input[type=text],input[type=password]{width:100%;padding:.6rem .75rem;" +
+            "background:#0f1117;border:1px solid #2a2d3a;border-radius:6px;" +
+            "color:#e0e0e0;font-size:.9rem;outline:none}\n" +
+            "input:focus{border-color:#5ba4f5}\n" +
+            ".btn{display:block;width:100%;margin-top:1.5rem;padding:.65rem;" +
+            "background:#5ba4f5;color:#0f1117;border:none;border-radius:6px;" +
+            "font-size:.95rem;font-weight:700;cursor:pointer}\n" +
+            ".btn:hover{background:#7ab8f7}\n" +
+            ".err{background:#2a1a1a;border:1px solid #7a3020;border-radius:6px;" +
+            "padding:.65rem .9rem;color:#f87171;font-size:.85rem;margin-bottom:1rem}\n" +
+            "</style>\n" +
+            "</head>\n<body>\n" +
+            "<div class=\"card\">\n" +
+            "<h1>\u26a1 FileBeam</h1>\n" +
+            errorHtml +
+            "<form method=\"post\" action=\"/login\">\n" +
+            $"<input type=\"hidden\" name=\"_csrf\" value=\"{csrfEsc}\">\n" +
+            nextHtml +
+            "<label for=\"u\">Username</label>\n" +
+            "<input id=\"u\" type=\"text\" name=\"username\" autocomplete=\"username\" autofocus required>\n" +
+            "<label for=\"p\">Password</label>\n" +
+            "<input id=\"p\" type=\"password\" name=\"password\" autocomplete=\"current-password\" required>\n" +
+            "<button class=\"btn\" type=\"submit\">Sign In</button>\n" +
+            "</form>\n" +
+            "</div>\n" +
+            "</body></html>\n";
     }
 
     /// <summary>
