@@ -481,6 +481,40 @@ public static class HtmlRenderer
                $"<script>try{{sessionStorage.setItem('fb-bearer','{safe}')}}catch{{}}</script>";
     }
 
+    /// <summary>
+    /// Returns an inline script that intercepts internal link-clicks and form-submits and
+    /// appends <c>?_bearer=…</c> to the URL when a session bearer token is present in
+    /// <c>sessionStorage</c>. Used on admin pages that do not embed <c>app.js</c> so that
+    /// navigation from those pages remains authenticated in cookie-hostile environments
+    /// (e.g. mobile QR-scanner webviews).
+    /// </summary>
+    internal static string BuildAuthNavScript() => """
+        <script>
+        (function(){
+          var b=(function(){try{return sessionStorage.getItem('fb-bearer')}catch{return null}})();
+          if(!b)return;
+          function addBearer(h){
+            if(!h||!h.startsWith('/')||h.includes('_bearer='))return h;
+            return h+(h.includes('?')?'&':'?')+'_bearer='+encodeURIComponent(b);
+          }
+          document.addEventListener('click',function(e){
+            var a=e.target.closest('a[href]');
+            if(!a)return;
+            var h=a.getAttribute('href');
+            if(!h||!h.startsWith('/')||/^\/(s|join|auto-login)\//.test(h)||h.includes('_bearer='))return;
+            e.preventDefault();
+            window.location.assign(addBearer(h));
+          });
+          document.addEventListener('submit',function(e){
+            var f=e.target;
+            if(!f||f.tagName!=='FORM')return;
+            var a=f.getAttribute('action')||'';
+            if(a.startsWith('/')&&!a.includes('_bearer='))f.setAttribute('action',addBearer(a));
+          });
+        })();
+        </script>
+        """;
+
     private static string BuildBreadcrumb(string[] segments, string urlBase = "")
     {
         var rootHref     = string.IsNullOrEmpty(urlBase) ? "/"         : $"/{urlBase}";
@@ -927,8 +961,9 @@ function initExpiryCountdowns() {
 }
 initExpiryCountdowns();
 </script>
-</body></html>
 """);
+        sb.Append(BuildAuthNavScript());
+        sb.Append("</body></html>\n");
 
         return sb.ToString();
     }
@@ -1102,6 +1137,7 @@ nav a{font-size:.82rem;color:#aaa;white-space:nowrap}
         }
 
         sb.Append("</div>\n");
+        sb.Append(BuildAuthNavScript());
         sb.Append("</body></html>\n");
 
         return sb.ToString();
@@ -1241,6 +1277,7 @@ nav a{font-size:.82rem;color:#aaa;white-space:nowrap}
         }
 
         sb.Append("</div>\n");
+        sb.Append(BuildAuthNavScript());
         sb.Append("</body></html>\n");
         return sb.ToString();
     }
@@ -1280,6 +1317,7 @@ nav a{font-size:.82rem;color:#aaa;white-space:nowrap}
                $"  <p class=\"expiry\">Expires at <strong>{expStr}</strong></p>\n" +
                "  <p class=\"hint\">This link is single-use. Scanning it again will show an error.</p>\n" +
                "</div>\n" +
+               BuildAuthNavScript() +
                "</body></html>\n";
     }
 
