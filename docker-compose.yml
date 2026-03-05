@@ -11,6 +11,10 @@
 # To enable a password, read-only mode, or per-sender upload folders, add to the command:
 #   command: ["--password", "secret", "--readonly"]
 #   command: ["--upload", "/srv/share/upload", "--per-sender"]
+#
+# Inside a container the QR code shows the container's internal IP (e.g. 172.17.0.2).
+# Use --advertise-ip to override with your host machine's LAN IP so the QR is scannable:
+#   command: ["--download", "/srv/share/download", "--port", "8080", "--advertise-ip", "192.168.1.100"]
 
 services:
   filebeam:

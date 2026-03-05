@@ -38,6 +38,7 @@ TimeSpan? uploadTtl         = null; // auto-delete TTL for uploaded files; null 
 int     maxConcurrentZips   = 2;   // max simultaneous ZIP streams; 0 = unlimited
 long    maxZipBytes         = 0;   // max directory size for ZIP; 0 = unlimited
 bool    cliNoQrAutologin    = false; // --no-qr-autologin: skip embedding token in startup QR
+string? cliAdvertiseIp     = null;  // --advertise-ip: override IP shown in QR/URL panel
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -139,6 +140,8 @@ for (int i = 0; i < args.Length; i++)
         printConfig = true;
     else if (args[i] == "--no-qr-autologin")
         cliNoQrAutologin = true;
+    else if (args[i] == "--advertise-ip" && i + 1 < args.Length)
+        cliAdvertiseIp = args[++i];
 }
 
 // ── Load config file (filebeam.json in CWD or --config path) ──────────────────
@@ -194,6 +197,7 @@ for (int i = 0; i < args.Length; i++)
             TryParseSize(cfg.MaxZipSize, out maxZipBytes);
         if (!cliNoQrAutologin && cfg!.QrAutologin == false)
             cliNoQrAutologin = true;
+        cliAdvertiseIp ??= cfg!.AdvertiseIp;
 
         AnsiConsole.MarkupLine($"[grey]Config loaded: {Markup.Escape(configPath)}[/]");
     }
@@ -457,6 +461,9 @@ var ips = NetworkInterface.GetAllNetworkInterfaces()
     .Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork)
     .Select(a => a.Address.ToString())
     .ToList();
+
+if (cliAdvertiseIp is not null)
+    ips = [cliAdvertiseIp];
 
 // ── Info panel ─────────────────────────────────────────────────────────────────
 bool separateDrop = !string.Equals(

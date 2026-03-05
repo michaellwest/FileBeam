@@ -36,6 +36,7 @@ internal sealed class FileBeamConfig
     [JsonPropertyName("maxConcurrentZips")] public int?   MaxConcurrentZips { get; init; }
     [JsonPropertyName("maxZipSize")]        public string? MaxZipSize       { get; init; }
     [JsonPropertyName("qrAutologin")]       public bool?  QrAutologin      { get; init; }
+    [JsonPropertyName("advertiseIp")]       public string? AdvertiseIp     { get; init; }
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -95,7 +96,8 @@ internal sealed class FileBeamConfig
         string? uploadTtl = null,
         int     maxConcurrentZips = 2,
         long    maxZipBytes = 0,
-        bool    qrAutologin = true)
+        bool    qrAutologin = true,
+        string? advertiseIp = null)
     {
         var sb = new StringBuilder("filebeam.exe");
         sb.Append($" --download \"{download}\"");
@@ -145,6 +147,8 @@ internal sealed class FileBeamConfig
             sb.Append($" --max-zip-size {FormatBytes(maxZipBytes)}");
         if (!qrAutologin)
             sb.Append(" --no-qr-autologin");
+        if (advertiseIp != null)
+            sb.Append($" --advertise-ip {advertiseIp}");
         return sb.ToString();
     }
 
