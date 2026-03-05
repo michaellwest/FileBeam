@@ -78,7 +78,7 @@ public static class HtmlRenderer
     /// Pass <paramref name="showHome"/> = true when rendering an alternate view (my-uploads, admin/uploads)
     /// so users can navigate back to the main file listing.
     /// </summary>
-    public static string BuildNavLinks(string role, bool perSender, bool separateUploadDir, bool showHome = false, bool isReadOnly = false, bool hasInvites = false, bool hasConfig = false, bool hasAuditLog = false, bool hasSessions = false)
+    public static string BuildNavLinks(string role, bool perSender, bool separateUploadDir, bool showHome = false, bool isReadOnly = false, bool hasInvites = false, bool hasConfig = false, bool hasAuditLog = false, bool hasSessions = false, bool hasQr = false)
     {
         const string sep  = """<span style="color:#444">·</span>""";
         const string style = "font-size:0.82rem;color:#aaa;white-space:nowrap";
@@ -123,6 +123,11 @@ public static class HtmlRenderer
         {
             if (sb.Length > 0) sb.Append(sep);
             sb.Append($"""<a href="/admin/sessions" style="{style}">Sessions</a>""");
+        }
+        if (role == "admin" && hasQr)
+        {
+            if (sb.Length > 0) sb.Append(sep);
+            sb.Append($"""<a href="/admin/qr" style="{style}">Admin&nbsp;QR</a>""");
         }
         return sb.ToString();
     }
@@ -1223,4 +1228,58 @@ nav a{font-size:.82rem;color:#aaa;white-space:nowrap}
         sb.Append("</body></html>\n");
         return sb.ToString();
     }
+
+    /// <summary>
+    /// Renders the admin QR code page with a freshly generated auto-login QR image.
+    /// </summary>
+    public static string RenderAdminQr(string base64Png, DateTimeOffset expiresAt, string navLinks = "")
+    {
+        var expStr = HttpUtility.HtmlEncode($"{expiresAt:HH:mm:ss} UTC (5 min)");
+        return "<!DOCTYPE html><html lang=\"en\"><head>\n" +
+               "<meta charset=\"UTF-8\">\n" +
+               "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n" +
+               "<title>FileBeam \u2014 Admin QR</title>\n" +
+               "<style>\n" +
+               "*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}\n" +
+               "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f1117;color:#e0e0e0;min-height:100vh;padding:2rem}\n" +
+               "a{color:#5ba4f5;text-decoration:none}a:hover{text-decoration:underline}\n" +
+               "header{display:flex;align-items:center;gap:1rem;margin-bottom:1.75rem}\n" +
+               "header h1{font-size:1.4rem;font-weight:700;color:#5ba4f5}\n" +
+               "nav a{font-size:.82rem;color:#aaa;white-space:nowrap}\n" +
+               ".card{background:#1a1d27;border-radius:8px;padding:1.5rem 2rem;display:inline-block;text-align:center;margin-top:1rem}\n" +
+               ".card img{display:block;max-width:320px;width:100%;border-radius:6px;background:#fff;padding:8px}\n" +
+               ".expiry{margin-top:1rem;font-size:.85rem;color:#888}\n" +
+               ".expiry strong{color:#facc15}\n" +
+               ".hint{margin-top:.75rem;font-size:.78rem;color:#555}\n" +
+               "</style>\n" +
+               "</head>\n<body>\n" +
+               "<header>\n" +
+               "  <h1>\u26a1 FileBeam</h1>\n" +
+               $"  <nav style=\"display:flex;align-items:center;gap:.75rem;margin-left:1rem\">{navLinks}</nav>\n" +
+               "</header>\n" +
+               "<h2 style=\"margin-bottom:.5rem\">Admin Auto-Login QR</h2>\n" +
+               "<p style=\"font-size:.85rem;color:#888\">Scan with your phone to log in as admin instantly &mdash; single use, expires in 5 minutes.</p>\n" +
+               "<div class=\"card\">\n" +
+               $"  <img src=\"data:image/png;base64,{base64Png}\" alt=\"Admin QR code\">\n" +
+               $"  <p class=\"expiry\">Expires at <strong>{expStr}</strong></p>\n" +
+               "  <p class=\"hint\">This link is single-use. Scanning it again will show an error.</p>\n" +
+               "</div>\n" +
+               "</body></html>\n";
+    }
+
+    /// <summary>
+    /// Renders a minimal error page for expired or already-used auto-login links.
+    /// </summary>
+    public static string RenderAutoLoginError() =>
+        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">" +
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+        "<title>Login Link Expired \u2014 FileBeam</title>" +
+        "<style>body{font-family:sans-serif;max-width:480px;margin:4rem auto;padding:0 1rem;background:#0f1117;color:#e0e0e0}" +
+        ".err{background:#2a1a1a;border:1px solid #7a3020;border-radius:6px;padding:1rem 1.5rem;color:#f87171}" +
+        "a{color:#5ba4f5}</style>" +
+        "</head><body>" +
+        "<h2 style=\"color:#5ba4f5\">FileBeam</h2>" +
+        "<div class=\"err\">This login link has expired or has already been used.</div>" +
+        "<p style=\"margin-top:1.5rem\"><a href=\"/\">Go to FileBeam</a> and log in with your credentials.</p>" +
+        "</body></html>";
 }

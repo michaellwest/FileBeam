@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Web;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
+using QRCoder;
 
 namespace FileBeam;
 
@@ -200,7 +201,8 @@ internal sealed class AdminHandlers(HandlerContext ctx)
 
         bool separateDir = !ctx.RootDir.Equals(ctx.UploadDir, StringComparison.OrdinalIgnoreCase);
         var navLinks = HtmlRenderer.BuildNavLinks("admin", ctx.PerSender, separateDir, showHome: true,
-            hasInvites: ctx.InviteStore is not null, hasAuditLog: true, hasSessions: ctx.HasSessions);
+            hasInvites: ctx.InviteStore is not null, hasAuditLog: true, hasSessions: ctx.HasSessions,
+            hasQr: ctx.AutoLoginStore is not null);
         return Results.Content(HtmlRenderer.RenderAuditLog(entries, navLinks), "text/html");
     }
 
@@ -238,7 +240,8 @@ internal sealed class AdminHandlers(HandlerContext ctx)
 
         bool separateDir = !ctx.RootDir.Equals(ctx.UploadDir, StringComparison.OrdinalIgnoreCase);
         var navLinks = HtmlRenderer.BuildNavLinks("admin", ctx.PerSender, separateDir, showHome: true,
-            hasInvites: ctx.InviteStore is not null, hasAuditLog: ctx.HasAuditLog, hasSessions: true);
+            hasInvites: ctx.InviteStore is not null, hasAuditLog: ctx.HasAuditLog, hasSessions: true,
+            hasQr: ctx.AutoLoginStore is not null);
         return Results.Content(HtmlRenderer.RenderSessionsAdmin(sessions, navLinks, ctx.CsrfToken), "text/html");
     }
 
@@ -317,7 +320,7 @@ internal sealed class AdminHandlers(HandlerContext ctx)
 
         var baseUrl      = $"{httpCtx.Request.Scheme}://{httpCtx.Request.Host}";
         bool separateDir = !ctx.RootDir.Equals(ctx.UploadDir, StringComparison.OrdinalIgnoreCase);
-        var navLinks     = HtmlRenderer.BuildNavLinks("admin", ctx.PerSender, separateDir, showHome: true, hasInvites: true, hasAuditLog: ctx.HasAuditLog, hasSessions: ctx.HasSessions);
+        var navLinks     = HtmlRenderer.BuildNavLinks("admin", ctx.PerSender, separateDir, showHome: true, hasInvites: true, hasAuditLog: ctx.HasAuditLog, hasSessions: ctx.HasSessions, hasQr: ctx.AutoLoginStore is not null);
         var html         = HtmlRenderer.RenderInvitesAdmin(ctx.InviteStore.GetAll(), ctx.CsrfToken, baseUrl, navLinks);
         return Results.Content(html, "text/html");
     }
@@ -439,6 +442,61 @@ internal sealed class AdminHandlers(HandlerContext ctx)
         }
 
         return Results.Content(JoinSuccessHtml(invite.FriendlyName, invite.Role), "text/html");
+    }
+
+    // ── Auto-login ─────────────────────────────────────────────────────────────
+
+    // GET /auto-login/{token}  — redeem a startup QR auto-login token, set admin session cookie
+    // This endpoint is exempt from auth middleware (handled in Program.cs bypass).
+    internal IResult RedeemAutoLogin(HttpContext httpCtx, string token)
+    {
+        var store = ctx.AutoLoginStore;
+        if (store is null || !store.TryRedeem(token))
+            return Results.Content(HtmlRenderer.RenderAutoLoginError(), "text/html");
+
+        if (ctx.SessionKey is null)
+            return Results.Content(HtmlRenderer.RenderAutoLoginError(), "text/html");
+
+        // Build HMAC-signed admin session cookie (no tokenId — admin path in TryValidateSessionCookie)
+        var payload    = new { role = "admin", issuedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds() };
+        var payloadB64 = Base64UrlEncode(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload)));
+        var sig        = HMACSHA256.HashData(ctx.SessionKey, Encoding.UTF8.GetBytes(payloadB64));
+        httpCtx.Response.Cookies.Append("fb.session",
+            payloadB64 + "." + Base64UrlEncode(sig),
+            new CookieOptions
+            {
+                HttpOnly = true,
+                SameSite = SameSiteMode.Lax,
+                Secure   = ctx.IsTls,
+                Path     = "/"
+            });
+        return Results.Redirect("/");
+    }
+
+    // GET /admin/qr  — regenerate a fresh admin auto-login QR (admin only)
+    internal IResult GetAdminQr(HttpContext httpCtx)
+    {
+        if (HandlerContext.GetRole(httpCtx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (ctx.AutoLoginStore is null)
+            return Results.Content("<p>Auto-login is disabled (--no-qr-autologin).</p>", "text/html");
+
+        var scheme = ctx.IsTls ? "https" : "http";
+        var host   = httpCtx.Request.Host.ToString();
+        var token  = ctx.AutoLoginStore.Generate();
+        var url    = $"{scheme}://{host}/auto-login/{token.Token}";
+
+        using var qrGen = new QRCodeGenerator();
+        var qrData  = qrGen.CreateQrCode(url, QRCodeGenerator.ECCLevel.L);
+        var pngQr   = new PngByteQRCode(qrData);
+        var base64  = Convert.ToBase64String(pngQr.GetGraphic(20));
+
+        bool separateDir = !ctx.RootDir.Equals(ctx.UploadDir, StringComparison.OrdinalIgnoreCase);
+        var navLinks = HtmlRenderer.BuildNavLinks("admin", ctx.PerSender, separateDir, showHome: true,
+            hasInvites: ctx.InviteStore is not null, hasAuditLog: ctx.HasAuditLog,
+            hasSessions: ctx.HasSessions, hasQr: true);
+        return Results.Content(HtmlRenderer.RenderAdminQr(base64, token.ExpiresAt, navLinks), "text/html");
     }
 
     // ── SSE live reload ────────────────────────────────────────────────────────
@@ -565,6 +623,17 @@ internal sealed class AdminHandlers(HandlerContext ctx)
         {
             using var doc  = JsonDocument.Parse(payloadBytes);
             var root       = doc.RootElement;
+
+            // Admin session cookie (from /auto-login) — no invite tokenId required
+            if (!root.TryGetProperty("tokenId", out var tidProp) ||
+                tidProp.ValueKind == JsonValueKind.Null)
+            {
+                var adminRole = root.TryGetProperty("role", out var rp) ? rp.GetString() : null;
+                role     = adminRole;
+                user     = "admin";
+                inviteId = null;
+                return role == "admin";
+            }
 
             var tokenId    = root.GetProperty("tokenId").GetString();
             var cookieRole = root.GetProperty("role").GetString();

@@ -63,7 +63,7 @@ internal sealed class BrowseHandlers(HandlerContext ctx)
 
         bool separateDir = !ctx.RootDir.Equals(ctx.UploadDir, StringComparison.OrdinalIgnoreCase);
         bool hasConfig = role == "admin" && ctx.ConfigJson.Length > 0;
-        var navLinks = HtmlRenderer.BuildNavLinks(role, ctx.PerSender, separateDir, isReadOnly: ctx.IsReadOnly, hasInvites: ctx.InviteStore is not null, hasConfig: hasConfig, hasAuditLog: ctx.HasAuditLog, hasSessions: ctx.HasSessions);
+        var navLinks = HtmlRenderer.BuildNavLinks(role, ctx.PerSender, separateDir, isReadOnly: ctx.IsReadOnly, hasInvites: ctx.InviteStore is not null, hasConfig: hasConfig, hasAuditLog: ctx.HasAuditLog, hasSessions: ctx.HasSessions, hasQr: ctx.AutoLoginStore is not null);
         var adminModal = hasConfig ? HtmlRenderer.BuildAdminConfigModal(ctx.ConfigJson, ctx.CliCommand) : "";
         var html = HtmlRenderer.RenderDirectory(relPath, dirs.ToList(), files.ToList(), ctx.IsReadOnly, ctx.CsrfToken, sort, order, role,
             separateUploadDir: separateDir, navLinks: navLinks, perSender: ctx.PerSender, adminConfigModal: adminModal);
@@ -128,7 +128,7 @@ internal sealed class BrowseHandlers(HandlerContext ctx)
             _      => desc ? files.OrderByDescending(f => f.Name)          : files.OrderBy(f => f.Name)
         };
 
-        var navLinks = HtmlRenderer.BuildNavLinks(role, ctx.PerSender, separateDir, showHome: true, isReadOnly: ctx.IsReadOnly, hasInvites: ctx.InviteStore is not null, hasSessions: ctx.HasSessions);
+        var navLinks = HtmlRenderer.BuildNavLinks(role, ctx.PerSender, separateDir, showHome: true, isReadOnly: ctx.IsReadOnly, hasInvites: ctx.InviteStore is not null, hasSessions: ctx.HasSessions, hasQr: ctx.AutoLoginStore is not null);
         // Pass separateUploadDir:false so the upload form is rendered (files DO land in uploadDir here)
         var html = HtmlRenderer.RenderDirectory(relPath, dirs.ToList(), files.ToList(), ctx.IsReadOnly, ctx.CsrfToken, sort, order, role,
             separateUploadDir: false, urlBase: "upload-area", navLinks: navLinks, perSender: ctx.PerSender, uploadTtl: ctx.UploadTtl);
@@ -192,7 +192,7 @@ internal sealed class BrowseHandlers(HandlerContext ctx)
         };
 
         bool separateDir = !ctx.RootDir.Equals(ctx.UploadDir, StringComparison.OrdinalIgnoreCase);
-        var navLinks = HtmlRenderer.BuildNavLinks(role, ctx.PerSender, separateDir, showHome: true, hasInvites: ctx.InviteStore is not null, hasSessions: ctx.HasSessions);
+        var navLinks = HtmlRenderer.BuildNavLinks(role, ctx.PerSender, separateDir, showHome: true, hasInvites: ctx.InviteStore is not null, hasSessions: ctx.HasSessions, hasQr: ctx.AutoLoginStore is not null);
         // Admin's own view: their entire subfolder is exempt from expiry
         var myAdminExemptPath = (ctx.PerSender && role == "admin") ? ctx.AdminExemptPath : null;
         var html = HtmlRenderer.RenderDirectory(
@@ -259,7 +259,7 @@ internal sealed class BrowseHandlers(HandlerContext ctx)
         };
 
         bool separateDir = !ctx.RootDir.Equals(ctx.UploadDir, StringComparison.OrdinalIgnoreCase);
-        var navLinks = HtmlRenderer.BuildNavLinks("admin", ctx.PerSender, separateDir, showHome: true, hasInvites: ctx.InviteStore is not null, hasAuditLog: ctx.HasAuditLog, hasSessions: ctx.HasSessions);
+        var navLinks = HtmlRenderer.BuildNavLinks("admin", ctx.PerSender, separateDir, showHome: true, hasInvites: ctx.InviteStore is not null, hasAuditLog: ctx.HasAuditLog, hasSessions: ctx.HasSessions, hasQr: ctx.AutoLoginStore is not null);
         var html = HtmlRenderer.RenderDirectory(
             relPath, dirs.ToList(), files.ToList(),
             isReadOnly: true,
