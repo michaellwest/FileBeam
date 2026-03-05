@@ -23,6 +23,33 @@ function authHeaders() {
   return autoBearerToken ? { 'Authorization': 'Bearer ' + autoBearerToken } : {};
 }
 
+/**
+ * Returns a URL with ?_bearer= appended when a session bearer token is available.
+ * Used for all in-app navigation and form actions so that browser-level requests
+ * carry authentication in environments without cookie support.
+ */
+function navUrl(href) {
+  if (!autoBearerToken || !href || !href.startsWith('/')) return href;
+  if (href.includes('_bearer=')) return href;
+  return href + (href.includes('?') ? '&' : '?') + '_bearer=' + encodeURIComponent(autoBearerToken);
+}
+
+// Intercept all internal link-clicks and add ?_bearer= to the URL so full-page
+// navigations authenticate correctly in environments where cookies are not stored.
+// Public endpoints (/s/, /join/, /auto-login/) are excluded.
+if (autoBearerToken) {
+  document.addEventListener('click', function (e) {
+    const a = e.target.closest('a[href]');
+    if (!a) return;
+    const href = a.getAttribute('href');
+    if (!href || !href.startsWith('/')) return;
+    if (/^\/(s|join|auto-login)\//.test(href)) return;
+    if (href.includes('_bearer=')) return;
+    e.preventDefault();
+    window.location.assign(navUrl(href));
+  });
+}
+
 let activeUploads = 0;
 let pendingRetries = 0;
 let anySucceeded  = false;
@@ -232,7 +259,7 @@ document.addEventListener('paste', e => {
 function fbDelete(url, name) {
   if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
   const f = document.createElement('form');
-  f.method = 'post'; f.action = url;
+  f.method = 'post'; f.action = navUrl(url);
   const csrf = document.createElement('input');
   csrf.type = 'hidden'; csrf.name = '_csrf'; csrf.value = csrfToken;
   f.appendChild(csrf);
@@ -244,7 +271,7 @@ function fbRename(url, currentName) {
   const newName = prompt('Rename to:', currentName);
   if (!newName || newName === currentName) return;
   const f = document.createElement('form');
-  f.method = 'post'; f.action = url;
+  f.method = 'post'; f.action = navUrl(url);
   const csrf = document.createElement('input');
   csrf.type = 'hidden'; csrf.name = '_csrf'; csrf.value = csrfToken;
   f.appendChild(csrf);
@@ -356,7 +383,7 @@ function fbMkDir(pathPrefix) {
   const base = pathPrefix ? pathPrefix + '/' : '';
   const url = '/mkdir/' + base + encodeURIComponent(folderName);
   const f = document.createElement('form');
-  f.method = 'post'; f.action = url;
+  f.method = 'post'; f.action = navUrl(url);
   const csrf = document.createElement('input');
   csrf.type = 'hidden'; csrf.name = '_csrf'; csrf.value = csrfToken;
   f.appendChild(csrf);
