@@ -12,11 +12,10 @@ internal static class AdminAuth
     /// <summary>
     /// Generates a cryptographically random 16-character alphanumeric password.
     /// </summary>
-    internal static string GeneratePassword()
+    internal static string GeneratePassword(int length = 16)
     {
-        const string chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        var bytes = RandomNumberGenerator.GetBytes(16);
-        return new string(bytes.Select(b => chars[b % chars.Length]).ToArray());
+        const string chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";    
+        return RandomNumberGenerator.GetString(chars, length);
     }
 
     /// <summary>

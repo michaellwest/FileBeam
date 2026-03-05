@@ -233,7 +233,7 @@ Generate a QR code for the direct download URL of any file so users on phones ca
 - No auth required to *view* the QR image (it only encodes a URL); downloading the file itself still enforces normal auth
 - README: document `GET /qr/{**subpath}` endpoint
 
-### FB-17 · Admin auto-login QR at startup
+### FB-17 · Admin auto-login QR at startup ✅
 
 Embed a single-use, time-limited admin token into the startup QR code so the admin can scan it to log in without typing credentials. Opt-out via `--no-qr-autologin`.
 
