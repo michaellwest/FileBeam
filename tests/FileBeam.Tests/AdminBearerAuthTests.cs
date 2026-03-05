@@ -234,9 +234,18 @@ public sealed class AdminBearerAuthTests
         try
         {
             var pass = AdminAuth.ResolveAdminPassword(null, null, keyFile, out _);
-            Assert.True(pass.Length >= 16);
+            // 24 raw chars + 5 dashes = 29 total; strip dashes to verify raw entropy
+            Assert.True(pass.Replace("-", "").Length >= 24);
         }
         finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public void GeneratePassword_HasExpectedChunkedFormat()
+    {
+        var pass = AdminAuth.GeneratePassword();
+        // Expect 6 groups of 4 chars from the dyslexia-safe alphabet, separated by dashes
+        Assert.Matches(@"^[acefghjkmrtvwxyACEFGHJKMRTVWXY347]{4}(-[acefghjkmrtvwxyACEFGHJKMRTVWXY347]{4}){5}$", pass);
     }
 
     [Fact]
