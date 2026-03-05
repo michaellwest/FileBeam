@@ -195,7 +195,7 @@ Click column headers (Name, Size, Modified) to sort the file listing ascending/d
 - Persist sort preference (column + direction) to `localStorage`
 - No server-side changes required
 
-### FB-14 · Bulk select + delete/download
+### ✅ FB-14 · Bulk select + delete/download
 
 Checkbox selection on the file listing table with a toolbar for acting on multiple files at once.
 
