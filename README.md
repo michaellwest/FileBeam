@@ -56,6 +56,7 @@ filebeam.exe --download "./share/download" --port 9000
 | `--upload-ttl`         |        | _(none)_             | Auto-delete uploaded files after this duration (`30m`, `24h`, `7d`). When `--per-sender` is active the admin's named subfolder is exempt. |
 | `--max-concurrent-zips` |       | `2`                  | Max simultaneous ZIP downloads; excess requests return 503. Set to `0` for unlimited. |
 | `--max-zip-size`       |        | _(none)_             | Reject ZIP requests for directories exceeding this size (`10GB`, `500MB`); returns 413. |
+| `--no-qr-autologin`    |        | _(off)_              | Disable the auto-login token embedded in the startup QR code; QR encodes the bare server URL instead. |
 | `--config`             |        | _(none)_             | Path to a config file (see [Config file](#config-file))           |
 | `--print-config`       |        | _(off)_              | Print the fully resolved config as JSON and exit (no server start) |
 
@@ -92,7 +93,8 @@ FileBeam can load all its settings from a `filebeam.json` file so you don't have
   "auditLogMaxSize": "10MB",
   "rateLimit":      60,
   "logLevel":       "info",
-  "uploadTtl":      "24h"
+  "uploadTtl":      "24h",
+  "qrAutologin":    true
 }
 ```
 
@@ -268,6 +270,25 @@ A **Sessions** link appears in the admin navigation bar. It opens `GET /admin/se
 **Columns:** Invite name · Role badge (color-coded) · IP · Auth method (bearer/cookie) · Last seen (relative time)
 
 Each row has a **Revoke** button that immediately deactivates the underlying invite token and removes all associated session entries. The page auto-refreshes every 30 seconds. Admin's own Basic Auth sessions are not tracked (only invite-based auth appears here).
+
+#### Admin auto-login QR
+
+By default the startup QR code encodes a **single-use 5-minute auto-login token** so the admin can scan once and land directly in an authenticated session — no password typing needed:
+
+```
+Scanning the QR code → GET /auto-login/{token} → admin session cookie set → redirect to /
+```
+
+- The token is burned on first use (scanning again shows an error page).
+- The token expires after 5 minutes. FileBeam prints the expiry time next to the QR.
+- Disable with `--no-qr-autologin` (or `"qrAutologin": false` in `filebeam.json`) to encode the bare server URL instead.
+
+While logged in, admins can regenerate a fresh QR at any time:
+
+| Method | Endpoint      | Description                                                    |
+| ------ | ------------- | -------------------------------------------------------------- |
+| `GET`  | `/auto-login/{token}` | Redeem a startup auto-login token (unauthenticated)  |
+| `GET`  | `/admin/qr`   | Generate a new auto-login QR and display it as HTML (admin only) |
 
 #### Upload expiry auto-delete
 

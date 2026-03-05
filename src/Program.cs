@@ -37,6 +37,7 @@ string  logLevel            = "info"; // info | debug
 TimeSpan? uploadTtl         = null; // auto-delete TTL for uploaded files; null = disabled
 int     maxConcurrentZips   = 2;   // max simultaneous ZIP streams; 0 = unlimited
 long    maxZipBytes         = 0;   // max directory size for ZIP; 0 = unlimited
+bool    cliNoQrAutologin    = false; // --no-qr-autologin: skip embedding token in startup QR
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -136,6 +137,8 @@ for (int i = 0; i < args.Length; i++)
     }
     else if (args[i] == "--print-config")
         printConfig = true;
+    else if (args[i] == "--no-qr-autologin")
+        cliNoQrAutologin = true;
 }
 
 // ── Load config file (filebeam.json in CWD or --config path) ──────────────────
@@ -189,14 +192,17 @@ for (int i = 0; i < args.Length; i++)
             maxConcurrentZips = Math.Max(0, cfg.MaxConcurrentZips.Value);
         if (maxZipBytes == 0 && cfg!.MaxZipSize is not null)
             TryParseSize(cfg.MaxZipSize, out maxZipBytes);
+        if (!cliNoQrAutologin && cfg!.QrAutologin == false)
+            cliNoQrAutologin = true;
 
         AnsiConsole.MarkupLine($"[grey]Config loaded: {Markup.Escape(configPath)}[/]");
     }
 }
 
 // Resolve bool flags (nullable CLI vars default to false if neither CLI nor config set them)
-bool readOnly  = cliReadOnly  ?? false;
-bool perSender = cliPerSender ?? false;
+bool readOnly      = cliReadOnly  ?? false;
+bool perSender     = cliPerSender ?? false;
+bool qrAutologin   = !cliNoQrAutologin;
 
 /// <summary>
 /// Parses a human-readable size string (e.g. "500MB", "2GB", "100KB", "unlimited", "0").
@@ -484,12 +490,28 @@ var panel = new Panel(
 AnsiConsole.Write(panel);
 
 // ── QR code for quick mobile access ──────────────────────────────────────────
-var scheme = tlsCertificate != null ? "https" : "http";
-var qrUrl  = ips.Count > 0 ? $"{scheme}://{ips[0]}:{port}" : $"{scheme}://localhost:{port}";
+var scheme  = tlsCertificate != null ? "https" : "http";
+var baseUrl = ips.Count > 0 ? $"{scheme}://{ips[0]}:{port}" : $"{scheme}://localhost:{port}";
+
+AutoLoginStore? autoLoginStore = null;
+string qrUrl = baseUrl;
+if (qrAutologin)
+{
+    autoLoginStore = new AutoLoginStore();
+    var autoToken  = autoLoginStore.Generate();
+    qrUrl = $"{baseUrl}/auto-login/{autoToken.Token}";
+}
+
 using var qrGen  = new QRCodeGenerator();
 var qrData       = qrGen.CreateQrCode(qrUrl, QRCodeGenerator.ECCLevel.L);
 var asciiQr      = new AsciiQRCode(qrData);
 AnsiConsole.WriteLine(asciiQr.GetGraphicSmall());
+
+if (qrAutologin && autoLoginStore is not null)
+{
+    var exp = autoLoginStore.GetActive()!.ExpiresAt;
+    AnsiConsole.MarkupLine($"[grey]\u23f1 QR auto-login expires at {exp:HH:mm:ss} UTC (5 min)[/]");
+}
 
 AnsiConsole.MarkupLine("[grey]Press Ctrl+C to stop.[/]\n");
 
@@ -626,7 +648,8 @@ var cliCommand = FileBeamConfig.ToCliCommand(
     logLevel:          logLevel,
     uploadTtl:         uploadTtl.HasValue ? FormatDuration(uploadTtl.Value) : null,
     maxConcurrentZips: maxConcurrentZips,
-    maxZipBytes:       maxZipBytes);
+    maxZipBytes:       maxZipBytes,
+    qrAutologin:       qrAutologin);
 
 var sessionRegistry = new SessionRegistry();
 
@@ -651,7 +674,8 @@ var handlers = new RouteHandlers(
     adminExemptPath:        uploadExpirer?.AdminSubfolder,
     sessionRegistry:        sessionRegistry,
     maxConcurrentZips:      maxConcurrentZips,
-    maxZipBytes:            maxZipBytes);
+    maxZipBytes:            maxZipBytes,
+    autoLoginStore:         autoLoginStore);
 
 // ── Console request log (with elapsed time) ──────────────────────────────────
 // Must be registered before route mappings so it wraps endpoint execution.
@@ -764,10 +788,11 @@ app.UseRateLimiter();
 
     app.Use(async (ctx, next) =>
     {
-        // Share link redemption and invite join are always unauthenticated
+        // Share link redemption, invite join, and auto-login are always unauthenticated
         if (ctx.Request.Method == "GET" &&
             (ctx.Request.Path.StartsWithSegments("/s") ||
-             ctx.Request.Path.StartsWithSegments("/join")))
+             ctx.Request.Path.StartsWithSegments("/join") ||
+             ctx.Request.Path.StartsWithSegments("/auto-login")))
         {
             await next();
             return;
@@ -964,6 +989,10 @@ app.MapPatch("/admin/invites/{id}",         (Delegate)handlers.EditInvite);
 
 // ── Invite join (unauthenticated) ─────────────────────────────────────────────
 app.MapGet("/join/{token}",                 handlers.JoinWithInvite);
+
+// ── Auto-login (unauthenticated — exempt in auth middleware) ──────────────────
+app.MapGet("/auto-login/{token}",           handlers.RedeemAutoLogin);
+app.MapGet("/admin/qr",                     handlers.GetAdminQr);
 
 try   { await app.RunAsync(); }
 finally

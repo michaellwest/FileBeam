@@ -52,7 +52,8 @@ public class RouteHandlers
         string? adminExemptPath = null,
         SessionRegistry? sessionRegistry = null,
         int maxConcurrentZips = 2,
-        long maxZipBytes = 0)
+        long maxZipBytes = 0,
+        AutoLoginStore? autoLoginStore = null)
     {
         var ctx = new HandlerContext(
             rootDir, uploadDir, watcher, isReadOnly, perSender,
@@ -61,7 +62,7 @@ public class RouteHandlers
             revocationStore, inviteStore, sessionKey, isTls, debugLog,
             configJson, cliCommand, auditLogPath, uploadTtl,
             adminExemptPath, sessionRegistry,
-            maxConcurrentZips, maxZipBytes);
+            maxConcurrentZips, maxZipBytes, autoLoginStore);
 
         _browse   = new BrowseHandlers(ctx);
         _download = new DownloadHandlers(ctx);
@@ -126,6 +127,8 @@ public class RouteHandlers
     public Task<IResult> EditInvite(HttpContext ctx, string id)         => _admin.EditInvite(ctx, id);
     public IResult JoinWithInvite(HttpContext ctx, string token)        => _admin.JoinWithInvite(ctx, token);
     public Task FileEvents(HttpContext ctx)                             => _admin.FileEvents(ctx);
+    public IResult RedeemAutoLogin(HttpContext ctx, string token)      => _admin.RedeemAutoLogin(ctx, token);
+    public IResult GetAdminQr(HttpContext ctx)                         => _admin.GetAdminQr(ctx);
 
     // ── Static helpers (kept for backward compatibility with Program.cs) ───────
     /// <inheritdoc cref="AdminHandlers.TryValidateSessionCookie"/>

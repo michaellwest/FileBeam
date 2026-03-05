@@ -32,7 +32,8 @@ internal sealed class HandlerContext(
     string? adminExemptPath = null,
     SessionRegistry? sessionRegistry = null,
     int maxConcurrentZips = 2,
-    long maxZipBytes = 0)
+    long maxZipBytes = 0,
+    AutoLoginStore? autoLoginStore = null)
 {
     internal string        RootDir                  => rootDir;
     internal string        UploadDir                => uploadDir;
@@ -63,6 +64,7 @@ internal sealed class HandlerContext(
 
     internal int  MaxConcurrentZips => maxConcurrentZips;
     internal long MaxZipBytes       => maxZipBytes;
+    internal AutoLoginStore? AutoLoginStore => autoLoginStore;
 
     /// <summary>
     /// Semaphore capping simultaneous ZIP streams. Null when <see cref="MaxConcurrentZips"/> is 0 (unlimited).

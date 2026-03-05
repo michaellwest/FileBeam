@@ -247,6 +247,39 @@ public sealed class CookieSessionTests
         finally { Directory.Delete(tmpDir, recursive: true); }
     }
 
+    // ── Admin session cookie (no tokenId — from /auto-login) ──────────────────
+
+    [Fact]
+    public void AdminCookie_NoTokenId_ValidSignature_ReturnsAdminRole()
+    {
+        // Simulate the cookie created by RedeemAutoLogin (no tokenId field)
+        var payloadObj  = new { role = "admin", issuedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds() };
+        var payloadJson = System.Text.Json.JsonSerializer.Serialize(payloadObj);
+        var payloadB64  = Base64UrlEncode(Encoding.UTF8.GetBytes(payloadJson));
+        var sig         = HMACSHA256.HashData(TestKey, Encoding.UTF8.GetBytes(payloadB64));
+        var cookie      = payloadB64 + "." + Base64UrlEncode(sig);
+
+        var result = RouteHandlers.TryValidateSessionCookie(cookie, TestKey, inviteStore: null, out var role, out var user, out var inviteId);
+
+        Assert.True(result);
+        Assert.Equal("admin", role);
+        Assert.Equal("admin", user);
+        Assert.Null(inviteId);
+    }
+
+    [Fact]
+    public void AdminCookie_NonAdminRole_ReturnsFalse()
+    {
+        // Cookie with no tokenId but role="rw" must be rejected (only admin is valid without tokenId)
+        var payloadObj  = new { role = "rw", issuedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds() };
+        var payloadJson = System.Text.Json.JsonSerializer.Serialize(payloadObj);
+        var payloadB64  = Base64UrlEncode(Encoding.UTF8.GetBytes(payloadJson));
+        var sig         = HMACSHA256.HashData(TestKey, Encoding.UTF8.GetBytes(payloadB64));
+        var cookie      = payloadB64 + "." + Base64UrlEncode(sig);
+
+        Assert.False(RouteHandlers.TryValidateSessionCookie(cookie, TestKey, inviteStore: null, out _, out _, out _));
+    }
+
     [Fact]
     public void JoinWithInvite_SessionForDifferentToken_StillCallsTryRedeem()
     {
