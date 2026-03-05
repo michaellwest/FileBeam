@@ -1,11 +1,12 @@
+# escape=`
 # ── Build ───────────────────────────────────────────────────────────────────
 FROM mcr.microsoft.com/dotnet/sdk:10.0-windowsservercore-ltsc2022 AS build
 WORKDIR C:\repo
 COPY src\ .\src\
-RUN dotnet publish src\FileBeam.csproj ^
-    -c Release -r win-x64 --self-contained true ^
-    -p:PublishSingleFile=true ^
-    -p:EnableCompressionInSingleFile=true ^
+RUN dotnet publish src\FileBeam.csproj `
+    -c Release -r win-x64 --self-contained true `
+    -p:PublishSingleFile=true `
+    -p:EnableCompressionInSingleFile=true `
     -o C:\out
 
 # ── Runtime ─────────────────────────────────────────────────────────────────
