@@ -28,9 +28,25 @@ Show a per-file upload progress bar in the browser UI with percentage and estima
 
 Paste an image (or any file) from the clipboard directly onto the page to upload it. Listens for the `paste` event on `document`, extracts `DataTransfer` items, and submits them through the same upload path as drag-and-drop. Works on all modern browsers.
 
+**Implementation:**
+
+- Listen for `paste` event on `document` in `app.js`
+- Extract `event.clipboardData.files` or filter `event.clipboardData.items` to `kind === "file"`
+- Re-use the existing `uploadFiles()` JS function to POST to `/upload/{subpath}`
+- Show a toast/notification indicating how many files were pasted
+- Works in all roles that can upload (admin, rw, wo); no server-side changes required
+
 ### FB-04 · Download count per file
 
-Track how many times each file has been downloaded and display the count in the directory listing. Counts are kept in-memory (lost on restart) and optionally persisted to a sidecar JSON file via a new `--download-counts` flag. The listing shows a small "N↓" badge next to each filename.
+Track how many times each file has been downloaded and display the count in the directory listing. Counts are in-memory only and reset on server restart.
+
+**Implementation:**
+
+- `ConcurrentDictionary<string, long>` keyed by absolute file path, held in `RouteHandlers`
+- Increment on every successful `GET /download/{**subpath}` (skip range-resume requests that start at offset > 0, or only count the first range for partial requests)
+- Add `downloadCount` field to `GET /info/{**subpath}` JSON response
+- Display as a "Downloads" column in the file listing table (admin role only; hidden from other roles to avoid information leakage)
+- No persistence; README notes that counts are ephemeral
 
 ---
 
@@ -38,11 +54,41 @@ Track how many times each file has been downloaded and display the count in the 
 
 ### FB-05 · Webhook on upload
 
-POST a JSON payload to a configurable URL whenever a file is successfully uploaded. Payload includes filename, size, uploader identity, timestamp, and destination path. Configured via `--webhook-url <url>` (and optionally `--webhook-secret` for HMAC-SHA256 signature verification). Non-blocking — fired in a background task so upload response is not delayed. Failed deliveries are logged but not retried.
+POST a JSON payload to a configurable URL whenever a file is successfully uploaded. Configured via `--webhook-url <url>`. Non-blocking — fired in a background task so the upload response is not delayed. Failed deliveries are logged at warn level but not retried.
+
+**Payload:**
+
+```json
+{
+  "event": "upload",
+  "file": "filename.ext",
+  "path": "/relative/path/filename.ext",
+  "sizeBytes": 12345,
+  "uploadedBy": "invite:Alice",
+  "timestamp": "2026-03-04T12:00:00Z"
+}
+```
+
+**Implementation:**
+
+- New CLI flag `--webhook-url <url>`; add `WebhookUrl` to `FileBeamConfig` and `ToCliCommand` export
+- Fire-and-forget `HttpClient.PostAsJsonAsync` in `UploadFiles` handler after successful write
+- Log delivery failure to console; do not block upload response
+- README: document `--webhook-url` flag and payload schema
 
 ### FB-06 · File preview panel
 
-Inline preview for images (PNG, JPEG, GIF, WebP, SVG), plain text, Markdown (rendered), and PDF (via browser `<embed>`). Clicking a supported file opens a side panel or modal instead of triggering a download. The panel has a Download button. Unsupported types fall back to the current download behaviour.
+Inline preview for images (PNG, JPEG, GIF, WebP, SVG) and plain text / code files. Clicking a supported file opens a side panel or modal instead of triggering a download. The panel has a Download button. Unsupported types fall back to the current download behaviour.
+
+**Implementation:**
+
+- Client-side panel (slide-in drawer or modal) in `app.js` / `index.html`
+- Determine render mode from the `mime` field in the existing `GET /info/{path}` response — no new endpoint needed
+- Image preview: `<img src="/download/{path}">` inside the panel
+- Text/code preview: `fetch("/download/{path}")` → display in `<pre>`; cap at first 64 KB client-side
+- "Download" button: `<a href="/download/{path}" download>`
+- Panel closes on Escape or click-outside
+- No server-side changes required
 
 ### FB-07 · Expiry auto-delete ✅
 
@@ -95,6 +141,94 @@ An admin page at `GET /admin/sessions` showing all currently active invite-based
 
 Drag a local folder onto the upload area and upload its entire directory tree, preserving relative paths. Uses the `webkitdirectory` attribute and the `DataTransferItem.webkitGetAsEntry()` API to walk the tree client-side, then uploads each file to the appropriate subpath on the server. Falls back gracefully on browsers that don't support the API.
 
+**Implementation:**
+
+- Add `webkitdirectory multiple` to the file `<input>` in `index.html`; expose as an opt-in toggle ("Upload folder" button) alongside the existing file picker
+- Browser provides `file.webkitRelativePath`; strip the top-level folder name (optional UI toggle to keep it)
+- POST each file individually to `/upload/{subpath}/{relativePath}` preserving nested structure
+- Server: `UploadFiles` handler calls `Directory.CreateDirectory` for intermediate segments before writing; `SafeResolvePath` already prevents traversal
+- Drag-and-drop: `DataTransferItem.webkitGetAsEntry()` → recursive `readEntries()` → same upload path
+- Show per-file progress using the existing progress bar; aggregate percentage across all queued files
+
 ### FB-11 · Bandwidth throttling
 
-Cap download throughput per connection with a `--max-download-rate` flag (e.g. `1MB/s`, `500KB/s`). Implemented as a throttled stream wrapper around the file stream. Useful for sharing large files over a connection where you want to preserve headroom for other traffic. Upload throttling is out of scope for this feature.
+Cap upload and download throughput per connection via `--max-upload-rate` and `--max-download-rate` flags (e.g. `1MB/s`, `500KB/s`). Useful for sharing large files over a connection where you want to preserve headroom for other traffic.
+
+**Implementation:**
+
+- Implement `ThrottledStream` — a wrapping `Stream` that uses a token-bucket algorithm to enforce a per-connection byte rate via `Task.Delay`
+- Upload throttling: wrap `ctx.Request.Body` before reading in `UploadFiles`
+- Download throttling: wrap the `FileStream` before passing to `Results.File()`
+- Rate is per-connection (not shared globally); document this in README
+- Add `MaxUploadRate` and `MaxDownloadRate` to `FileBeamConfig` and `ToCliCommand` export
+- Parse human-readable values (`1MB/s`, `500KB/s`) the same way as `--max-upload-size`
+
+---
+
+## Gaps / New Features
+
+### FB-12 · Server-side file search
+
+A search endpoint and UI input that finds files by name across the entire directory tree (not just the current page).
+
+**Implementation:**
+
+- New endpoint: `GET /search?q=<term>&root=<subpath>`
+- Server recursively enumerates `serveDir` (or `serveDir/<subpath>`) via `Directory.EnumerateFiles(..., "*", SearchOption.AllDirectories)`
+- Filters file names (not full paths) case-insensitively against `q`
+- Returns JSON array: `[{ "name": "foo.txt", "path": "/relative/path/foo.txt", "sizeBytes": 123, "modified": "..." }]`
+- Cap results at 500 entries; include `"truncated": true` in response if exceeded
+- Client: search box above the file table in `index.html`; on Enter or button click calls `/search?q=...&root=<currentPath>` and renders a flat result list
+- Auth: same requirement as directory listing (any authenticated user)
+- README: document `GET /search` endpoint
+
+### FB-13 · File sorting (column headers)
+
+Click column headers (Name, Size, Modified) to sort the file listing ascending/descending.
+
+**Implementation:**
+
+- Client-side only — sort already-rendered table rows in `app.js`
+- Add `data-sort-key` attributes to `<th>` cells: `name`, `size`, `modified`
+- Click cycles: ascending → descending → original order; show ▲/▼ indicator in header
+- `HtmlRenderer` emits `data-size` and `data-modified` attributes on `<tr>` rows so JS can sort numerically/chronologically without re-parsing display text
+- Persist sort preference (column + direction) to `localStorage`
+- No server-side changes required
+
+### FB-14 · Bulk select + delete/download
+
+Checkbox selection on the file listing table with a toolbar for acting on multiple files at once.
+
+**Implementation:**
+
+- Add a checkbox column to the file table in `index.html`; "select all" checkbox in the header row
+- Bulk actions toolbar appears when ≥1 file is selected: **Download as ZIP** (all roles) and **Delete selected** (admin only)
+- Bulk download: POST selected paths to new `POST /download-zip` endpoint with JSON body `{ "paths": [...] }` → streams a ZIP response (reuse ZIP logic from `/upload-area/download-zip/`)
+- Bulk delete: POST selected paths to new `POST /admin/delete-bulk` endpoint → deletes each, returns JSON summary of successes/failures
+- Both endpoints require a valid CSRF token
+- README: document new endpoints
+
+### FB-15 · ZIP download from main browse view
+
+Extend the existing ZIP download capability (currently upload-area only) to the main browse tree.
+
+**Implementation:**
+
+- New route: `GET /download-zip/{**subpath}` mapped against `serveDir`
+- Reuse the existing ZIP streaming helper from `/upload-area/download-zip/`; only the root directory differs
+- Add a "Download as ZIP" button to directory rows in the main browse listing (`HtmlRenderer`)
+- Blocked for `wo` role (consistent with single-file download restriction)
+- README: document endpoint
+
+### FB-16 · Per-file QR code
+
+Generate a QR code for the direct download URL of any file so users on phones can scan it without copying a link.
+
+**Implementation:**
+
+- New endpoint: `GET /qr/{**subpath}` — returns a PNG QR code for `http(s)://<host>:<port>/download/<path>`
+- Use the existing `QRCoder` NuGet package (already a dependency)
+- QR encodes the direct download URL (not a share token; use the share flow for expiring links)
+- In the file listing, add a small QR icon button per file row; clicking opens a modal with the QR `<img>`
+- No auth required to *view* the QR image (it only encodes a URL); downloading the file itself still enforces normal auth
+- README: document `GET /qr/{**subpath}` endpoint
