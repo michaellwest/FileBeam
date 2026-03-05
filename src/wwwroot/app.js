@@ -7,6 +7,22 @@ const form  = document.getElementById('upload-form');
 // CSRF token embedded by the server — included in every state-changing request
 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
 
+// ── Session bearer token (cookie-free auth for QR auto-login environments) ────
+// Some mobile browsers / QR-scanner webviews do not persist cookies.
+// The server embeds an admin bearer token in <meta name="fb-bearer"> after QR auto-login.
+// We persist it in sessionStorage so navigation within the tab keeps working even after
+// the meta tag is no longer injected (subsequent page loads use the stored value).
+const _metaBearer = document.querySelector('meta[name="fb-bearer"]')?.content;
+if (_metaBearer) { try { sessionStorage.setItem('fb-bearer', _metaBearer); } catch {} }
+const autoBearerToken = _metaBearer
+  || (() => { try { return sessionStorage.getItem('fb-bearer'); } catch { return null; } })()
+  || null;
+
+/** Returns an object with an Authorization header if a session bearer token is available. */
+function authHeaders() {
+  return autoBearerToken ? { 'Authorization': 'Bearer ' + autoBearerToken } : {};
+}
+
 let activeUploads = 0;
 let pendingRetries = 0;
 let anySucceeded  = false;
@@ -96,6 +112,7 @@ function uploadFile(file) {
   });
 
   xhr.open('POST', form.action);
+  if (autoBearerToken) xhr.setRequestHeader('Authorization', 'Bearer ' + autoBearerToken);
   xhr.send(fd);
 }
 
@@ -267,7 +284,7 @@ function fbPreview(url, name, ext) {
     fr.src = url;
     _previewContent.appendChild(fr);
   } else if (TEXT_EXTS.has(ext)) {
-    fetch(url).then(r => r.text()).then(text => {
+    fetch(url, { headers: authHeaders() }).then(r => r.text()).then(text => {
       const pre = document.createElement('pre');
       pre.textContent = text;
       _previewContent.appendChild(pre);
@@ -295,7 +312,7 @@ async function fbInfo(url, name) {
   _previewContent.innerHTML = '<p style="color:#888;font-size:0.9rem">Computing…</p>';
   _previewPanel.hidden = false;
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: authHeaders() });
     if (!res.ok) { _previewContent.innerHTML = '<p style="color:#e06c75">Could not load file info (status ' + res.status + ').</p>'; return; }
     const { name: n, size, modified, mimeType, sha256 } = await res.json();
     const tdL = 'style="color:#888;padding:0.4rem 1rem 0.4rem 0;white-space:nowrap;vertical-align:top"';
@@ -320,7 +337,7 @@ async function fbShare(url) {
   const fd = new FormData();
   fd.append('_csrf', csrfToken);
   try {
-    const res = await fetch(url, { method: 'POST', body: fd });
+    const res = await fetch(url, { method: 'POST', body: fd, headers: authHeaders() });
     if (!res.ok) { alert('Failed to create share link (status ' + res.status + ')'); return; }
     const { url: shareUrl, expiresIn } = await res.json();
     const full = location.origin + shareUrl;
@@ -353,7 +370,7 @@ const _diskAbort = new AbortController();
   const el = document.getElementById('disk-info');
   if (!el) return;
   try {
-    const r = await fetch('/disk-space', { signal: _diskAbort.signal });
+    const r = await fetch('/disk-space', { signal: _diskAbort.signal, headers: authHeaders() });
     if (!r.ok) return; // 204 No Content (virtual/network drive) — hide silently
     const { availableBytes, totalBytes } = await r.json();
     if (!totalBytes) return;
@@ -368,9 +385,13 @@ const _diskAbort = new AbortController();
 })();
 
 // ── Live reload via Server-Sent Events ────────────────────────────────────────
+// EventSource cannot set custom headers; pass the bearer token as a query param instead.
 let _sseSource = null;
 (function connectSSE() {
-  const es = _sseSource = new EventSource('/events');
+  const eventsUrl = autoBearerToken
+    ? '/events?_bearer=' + encodeURIComponent(autoBearerToken)
+    : '/events';
+  const es = _sseSource = new EventSource(eventsUrl);
   es.onmessage = (e) => {
     if (e.data === 'reload') window.location.reload();
   };

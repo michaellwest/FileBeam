@@ -446,8 +446,12 @@ internal sealed class AdminHandlers(HandlerContext ctx)
 
     // ── Auto-login ─────────────────────────────────────────────────────────────
 
-    // GET /auto-login/{token}  — redeem a startup QR auto-login token, set admin session cookie
+    // GET /auto-login/{token}  — redeem a startup QR auto-login token, redirect with continuation token
     // This endpoint is exempt from auth middleware (handled in Program.cs bypass).
+    // The session cookie is NOT set here. A short-lived single-use continuation token is embedded
+    // in the redirect URL (?_fbs=…). The auth middleware sets the cookie when the browser lands on
+    // GET /, ensuring the cookie is in the response the browser keeps — not an intermediate redirect
+    // that mobile browsers and QR-scanner webviews don't reliably forward cookies through.
     internal IResult RedeemAutoLogin(HttpContext httpCtx, string token)
     {
         var store = ctx.AutoLoginStore;
@@ -457,20 +461,8 @@ internal sealed class AdminHandlers(HandlerContext ctx)
         if (ctx.SessionKey is null)
             return Results.Content(HtmlRenderer.RenderAutoLoginError(), "text/html");
 
-        // Build HMAC-signed admin session cookie (no tokenId — admin path in TryValidateSessionCookie)
-        var payload    = new { role = "admin", issuedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds() };
-        var payloadB64 = Base64UrlEncode(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload)));
-        var sig        = HMACSHA256.HashData(ctx.SessionKey, Encoding.UTF8.GetBytes(payloadB64));
-        httpCtx.Response.Cookies.Append("fb.session",
-            payloadB64 + "." + Base64UrlEncode(sig),
-            new CookieOptions
-            {
-                HttpOnly = true,
-                SameSite = SameSiteMode.Lax,
-                Secure   = ctx.IsTls,
-                Path     = "/"
-            });
-        return Results.Redirect("/");
+        var contToken = store.GenerateContinuationToken();
+        return Results.Redirect($"/?_fbs={contToken}");
     }
 
     // GET /admin/qr  — regenerate a fresh admin auto-login QR (admin only)

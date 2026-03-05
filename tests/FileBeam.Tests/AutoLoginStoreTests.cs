@@ -106,4 +106,93 @@ public sealed class AutoLoginStoreTests
 
         Assert.False(store.TryRedeem("anyvalue"));
     }
+
+    // ── Continuation tokens ────────────────────────────────────────────────────
+
+    [Fact]
+    public void GenerateContinuationToken_ReturnsNonEmptyString()
+    {
+        var store = new AutoLoginStore();
+        var token = store.GenerateContinuationToken();
+        Assert.False(string.IsNullOrEmpty(token));
+    }
+
+    [Fact]
+    public void TryRedeemContinuation_ValidToken_ReturnsTrue()
+    {
+        var store = new AutoLoginStore();
+        var token = store.GenerateContinuationToken();
+        Assert.True(store.TryRedeemContinuation(token));
+    }
+
+    [Fact]
+    public void TryRedeemContinuation_BurnsToken()
+    {
+        var store = new AutoLoginStore();
+        var token = store.GenerateContinuationToken();
+        store.TryRedeemContinuation(token);
+        Assert.False(store.TryRedeemContinuation(token));
+    }
+
+    [Fact]
+    public void TryRedeemContinuation_UnknownToken_ReturnsFalse()
+    {
+        var store = new AutoLoginStore();
+        Assert.False(store.TryRedeemContinuation("notarealtoken"));
+    }
+
+    [Fact]
+    public void TryRedeemContinuation_MultipleTokensCoexist()
+    {
+        var store = new AutoLoginStore();
+        var a = store.GenerateContinuationToken();
+        var b = store.GenerateContinuationToken();
+        Assert.True(store.TryRedeemContinuation(a));
+        Assert.True(store.TryRedeemContinuation(b));
+    }
+
+    // ── Session bearer tokens ───────────────────────────────────────────────────
+
+    [Fact]
+    public void GenerateSessionBearer_ReturnsNonEmptyString()
+    {
+        var store = new AutoLoginStore();
+        var token = store.GenerateSessionBearer();
+        Assert.False(string.IsNullOrEmpty(token));
+    }
+
+    [Fact]
+    public void TryValidateSessionBearer_ValidToken_ReturnsTrue()
+    {
+        var store = new AutoLoginStore();
+        var token = store.GenerateSessionBearer();
+        Assert.True(store.TryValidateSessionBearer(token));
+    }
+
+    [Fact]
+    public void TryValidateSessionBearer_ValidToken_DoesNotBurnToken()
+    {
+        var store = new AutoLoginStore();
+        var token = store.GenerateSessionBearer();
+        store.TryValidateSessionBearer(token);
+        // Session bearers are reusable — the same token must remain valid after use.
+        Assert.True(store.TryValidateSessionBearer(token));
+    }
+
+    [Fact]
+    public void TryValidateSessionBearer_UnknownToken_ReturnsFalse()
+    {
+        var store = new AutoLoginStore();
+        Assert.False(store.TryValidateSessionBearer("notavalidtoken"));
+    }
+
+    [Fact]
+    public void TryValidateSessionBearer_MultipleTokensCoexist()
+    {
+        var store = new AutoLoginStore();
+        var a = store.GenerateSessionBearer();
+        var b = store.GenerateSessionBearer();
+        Assert.True(store.TryValidateSessionBearer(a));
+        Assert.True(store.TryValidateSessionBearer(b));
+    }
 }
