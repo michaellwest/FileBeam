@@ -65,8 +65,12 @@ internal sealed class BrowseHandlers(HandlerContext ctx)
         bool hasConfig = role == "admin" && ctx.ConfigJson.Length > 0;
         var navLinks = HtmlRenderer.BuildNavLinks(role, ctx.PerSender, separateDir, isReadOnly: ctx.IsReadOnly, hasInvites: ctx.InviteStore is not null, hasConfig: hasConfig, hasAuditLog: ctx.HasAuditLog, hasSessions: ctx.HasSessions, hasQr: ctx.AutoLoginStore is not null);
         var adminModal = hasConfig ? HtmlRenderer.BuildAdminConfigModal(ctx.ConfigJson, ctx.CliCommand) : "";
+        // Pass auto-bearer token to page when set by the _fbs continuation-token auth path.
+        // JavaScript reads it from the meta tag / sessionStorage and attaches it to all sub-requests.
+        var autoBearerToken = httpCtx.Items.TryGetValue("fb.auto-bearer", out var ab) && ab is string s ? s : null;
         var html = HtmlRenderer.RenderDirectory(relPath, dirs.ToList(), files.ToList(), ctx.IsReadOnly, ctx.CsrfToken, sort, order, role,
-            separateUploadDir: separateDir, navLinks: navLinks, perSender: ctx.PerSender, adminConfigModal: adminModal);
+            separateUploadDir: separateDir, navLinks: navLinks, perSender: ctx.PerSender, adminConfigModal: adminModal,
+            autoBearerToken: autoBearerToken);
         return Results.Content(html, "text/html");
     }
 

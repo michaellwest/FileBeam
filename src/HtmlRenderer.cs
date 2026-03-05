@@ -29,7 +29,8 @@ public static class HtmlRenderer
         bool perSender = false,
         string adminConfigModal = "",
         TimeSpan? uploadTtl = null,
-        string? adminExemptPath = null)
+        string? adminExemptPath = null,
+        string? autoBearerToken = null)
     {
         var segments = relPath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
 
@@ -70,7 +71,8 @@ public static class HtmlRenderer
             .Replace("{{CSRF_TOKEN}}",      HttpUtility.HtmlAttributeEncode(csrfToken))
             .Replace("{{ADMIN_CONFIG_MODAL}}", adminConfigModal)
             .Replace("{{APP_JS}}",          ResourceLoader.AppJs)
-            .Replace("{{EXPIRY_JS}}",       showExpiry ? BuildExpiryJs() : "");
+            .Replace("{{EXPIRY_JS}}",       showExpiry ? BuildExpiryJs() : "")
+            .Replace("{{FB_BEARER_META}}",  BuildBearerMeta(autoBearerToken));
     }
 
     /// <summary>
@@ -464,6 +466,20 @@ public static class HtmlRenderer
         """;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Builds the meta tag and inline sessionStorage script for the auto-login session bearer token.
+    /// Returns an empty string when no bearer token is present (normal auth flow).
+    /// The token is a lowercase hex string so no HTML encoding is required, but we encode anyway for safety.
+    /// </summary>
+    private static string BuildBearerMeta(string? token)
+    {
+        if (token is null) return "";
+        var safe = HttpUtility.HtmlAttributeEncode(token);
+        // Hex string — no JS injection risk, but escape in the script for defence in depth.
+        return $"<meta name=\"fb-bearer\" content=\"{safe}\">" +
+               $"<script>try{{sessionStorage.setItem('fb-bearer','{safe}')}}catch{{}}</script>";
+    }
 
     private static string BuildBreadcrumb(string[] segments, string urlBase = "")
     {

@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Text.Json;
 using System.Threading.RateLimiting;
 using FileBeam;
 using QRCoder;
@@ -856,16 +857,81 @@ app.UseRateLimiter();
 
         // 3. Session cookie — invite-based browser auth
         var sessionCookie = ctx.Request.Cookies["fb.session"];
-        if (!authenticated && sessionCookie is not null &&
-            RouteHandlers.TryValidateSessionCookie(sessionCookie, sessionKey, inviteStore, out var cookieRole, out var cookieUser, out var cookieInviteId))
+        if (!authenticated && sessionCookie is not null)
         {
-            ctx.Items["fb.role"] = cookieRole;
-            ctx.Items["fb.user"] = cookieUser;
-            authenticated = true;
+            var cookieValid = RouteHandlers.TryValidateSessionCookie(sessionCookie, sessionKey, inviteStore, out var cookieRole, out var cookieUser, out var cookieInviteId);
+            debugLog?.Invoke("auth", $"session cookie present ({sessionCookie.Length} chars), valid={cookieValid}, role={cookieRole}");
+            if (cookieValid)
+            {
+                ctx.Items["fb.role"] = cookieRole;
+                ctx.Items["fb.user"] = cookieUser;
+                authenticated = true;
 
-            // Track session for active sessions dashboard
-            if (cookieInviteId is not null && inviteStore.TryGet(cookieInviteId, out var cookieInvite))
-                sessionRegistry.Touch(cookieInviteId, cookieInvite!.FriendlyName, cookieRole!, ip, "cookie");
+                // Track session for active sessions dashboard
+                if (cookieInviteId is not null && inviteStore.TryGet(cookieInviteId, out var cookieInvite))
+                    sessionRegistry.Touch(cookieInviteId, cookieInvite!.FriendlyName, cookieRole!, ip, "cookie");
+            }
+        }
+        else if (!authenticated)
+        {
+            debugLog?.Invoke("auth", "no fb.session cookie in request");
+        }
+
+        // 4. Auto-login continuation token — ?_fbs=… (single-use, 60 s TTL)
+        // Set by /auto-login/{token} after the QR token is validated. The cookie is set HERE
+        // (in the response to GET /) rather than in the redirect response, because some mobile
+        // browsers and QR-scanner webviews don't forward Set-Cookie across redirects.
+        if (!authenticated && autoLoginStore is not null && sessionKey is not null &&
+            ctx.Request.Method == "GET" &&
+            ctx.Request.Query.TryGetValue("_fbs", out var fbsValues) &&
+            fbsValues.Count > 0 &&
+            autoLoginStore.TryRedeemContinuation(fbsValues[0]!))
+        {
+            static string B64Url(byte[] d) =>
+                Convert.ToBase64String(d).Replace('+', '-').Replace('/', '_').TrimEnd('=');
+            var pl  = B64Url(Encoding.UTF8.GetBytes(
+                JsonSerializer.Serialize(new { role = "admin", issuedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds() })));
+            ctx.Response.Cookies.Append("fb.session",
+                pl + "." + B64Url(HMACSHA256.HashData(sessionKey, Encoding.UTF8.GetBytes(pl))),
+                new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Lax,
+                    Secure = tlsCertificate is not null, Path = "/" });
+            ctx.Items["fb.role"] = "admin";
+            ctx.Items["fb.user"] = "admin";
+            authenticated = true;
+            // Issue a session bearer so JavaScript sub-requests (EventSource, fetch, XHR) can
+            // authenticate via Authorization header or ?_bearer= without relying on cookies.
+            ctx.Items["fb.auto-bearer"] = autoLoginStore.GenerateSessionBearer();
+            debugLog?.Invoke("auth", "admin authenticated via _fbs continuation token");
+        }
+
+        // 5. Auto-login session bearer — Authorization: Bearer header or ?_bearer= query param.
+        // Used by JavaScript-initiated sub-requests (EventSource, fetch, XHR) in environments
+        // where the session cookie is not persisted (mobile QR-scanner webviews).
+        if (!authenticated && autoLoginStore is not null)
+        {
+            string? sessionBearer = null;
+            var authHdr = ctx.Request.Headers.Authorization.ToString();
+            if (authHdr.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            {
+                var candidate = authHdr[7..].Trim();
+                if (autoLoginStore.TryValidateSessionBearer(candidate))
+                    sessionBearer = candidate;
+            }
+            if (sessionBearer is null &&
+                ctx.Request.Query.TryGetValue("_bearer", out var bVals) &&
+                bVals.Count > 0)
+            {
+                var candidate = bVals[0]!;
+                if (autoLoginStore.TryValidateSessionBearer(candidate))
+                    sessionBearer = candidate;
+            }
+            if (sessionBearer is not null)
+            {
+                ctx.Items["fb.role"] = "admin";
+                ctx.Items["fb.user"] = "admin";
+                authenticated = true;
+                debugLog?.Invoke("auth", "admin authenticated via session bearer token");
+            }
         }
 
         if (authenticated)
