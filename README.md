@@ -57,6 +57,7 @@ filebeam.exe --download "./share/download" --port 9000
 | `--max-concurrent-zips` |       | `2`                  | Max simultaneous ZIP downloads; excess requests return 503. Set to `0` for unlimited. |
 | `--max-zip-size`       |        | _(none)_             | Reject ZIP requests for directories exceeding this size (`10GB`, `500MB`); returns 413. |
 | `--no-qr-autologin`    |        | _(off)_              | Disable the auto-login token embedded in the startup QR code; QR encodes the bare server URL instead. |
+| `--advertise-ip`       |        | _(auto-detected)_    | Override the IP address shown in the startup QR code and URL panel. Useful in Docker/container deployments where the detected IP is the container's internal address rather than the host's LAN IP. The Kestrel bind address (`0.0.0.0`) is unaffected. |
 | `--config`             |        | _(none)_             | Path to a config file (see [Config file](#config-file))           |
 | `--print-config`       |        | _(off)_              | Print the fully resolved config as JSON and exit (no server start) |
 
