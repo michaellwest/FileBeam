@@ -7,6 +7,11 @@ namespace FileBeam;
 /// Shared state and cross-cutting helpers used by all domain handler classes.
 /// One instance is created at startup and injected into each handler.
 /// </summary>
+/// <summary>
+/// JSON body shape for bulk-path endpoints (bulk download/delete).
+/// </summary>
+internal record BulkPathsRequest(string[] Paths);
+
 internal sealed class HandlerContext(
     string rootDir,
     string uploadDir,

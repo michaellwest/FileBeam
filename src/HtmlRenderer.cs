@@ -67,6 +67,7 @@ public static class HtmlRenderer
             .Replace("{{BREADCRUMB}}",      BuildBreadcrumb(segments, urlBase))
             .Replace("{{THEAD}}",           BuildTHead(sort, order, urlBase, showExpiry))
             .Replace("{{ROWS}}",            BuildRows(segments, dirs, files, isAdmin, urlBase, uploadTtl, adminExemptPath))
+            .Replace("{{TABLE_ATTRS}}",     BuildTableAttrs(urlBase, isAdmin))
             .Replace("{{UPLOAD_SECTION}}", uploadSection)
             .Replace("{{CSRF_TOKEN}}",      HttpUtility.HtmlAttributeEncode(csrfToken))
             .Replace("{{ADMIN_CONFIG_MODAL}}", adminConfigModal)
@@ -146,6 +147,7 @@ public static class HtmlRenderer
         var expiryTh = showExpiry ? "<th>Expires</th>" : "";
         return $"""
         <tr>
+          <th class="col-check"><input type="checkbox" id="select-all" title="Select all"></th>
           <th>{SortLink("name", "Name")}</th>
           <th>{SortLink("size", "Size")}</th>
           <th>{SortLink("date", "Modified")}</th>
@@ -153,6 +155,22 @@ public static class HtmlRenderer
           <th></th>
         </tr>
         """;
+    }
+
+    /// <summary>
+    /// Returns data-* attributes for the &lt;table&gt; element used by bulk-action JS.
+    /// </summary>
+    private static string BuildTableAttrs(string urlBase, bool isAdmin)
+    {
+        var (dlEndpoint, delEndpoint) = urlBase switch
+        {
+            "upload-area"    => ("/upload-area/download-zip",   isAdmin ? "/admin/uploads/delete-bulk" : ""),
+            "my-uploads"     => ("/my-uploads/download-zip",    ""),
+            "admin/uploads"  => ("/admin/uploads/download-zip", isAdmin ? "/admin/uploads/delete-bulk" : ""),
+            _                => ("/download-zip",               isAdmin ? "/admin/delete-bulk" : "")
+        };
+        var del = string.IsNullOrEmpty(delEndpoint) ? "" : $""" data-bulk-del="{delEndpoint}" """;
+        return $"""data-bulk-dl="{dlEndpoint}"{del}""";
     }
 
     private static string BuildUploadSection(
@@ -248,7 +266,7 @@ public static class HtmlRenderer
         var isAdminUploads = urlBase == "admin/uploads";
         var isUploadArea   = urlBase == "upload-area";
         var showExpiry     = uploadTtl.HasValue;
-        var colSpan        = showExpiry ? "5" : "4";
+        var colSpan        = showExpiry ? "6" : "5";
 
         var sb = new StringBuilder();
 
@@ -260,6 +278,7 @@ public static class HtmlRenderer
                 : browsePrefix + string.Join("/", segments[..^1].Select(Uri.EscapeDataString));
             sb.AppendLine($"""
                     <tr>
+                      <td class="col-check"></td>
                       <td colspan="{colSpan}"><a href="{parentPath}" class="name"><span class="icon">📁</span> ..</a></td>
                     </tr>
                 """);
@@ -291,6 +310,7 @@ public static class HtmlRenderer
             var dirExpiryTd = showExpiry ? "<td></td>" : "";
             sb.AppendLine($"""
                     <tr>
+                      <td class="col-check"></td>
                       <td><a href="{href}" class="name"><span class="icon">📁</span>{name}/</a></td>
                       <td class="size">—</td>
                       <td class="modified">{modif}</td>
@@ -389,8 +409,13 @@ public static class HtmlRenderer
                 }
             }
 
+            // Relative path for bulk-action data-path (decoded, forward-slash separated)
+            var relPath = segments.Length == 0 ? file.Name : string.Join("/", segments) + "/" + file.Name;
+            var checkboxCell = $"""<td class="col-check"><input type="checkbox" class="file-select" data-path="{HttpUtility.HtmlAttributeEncode(relPath)}"></td>""";
+
             sb.AppendLine($"""
                     <tr>
+                      {checkboxCell}
                       <td>{nameCell}</td>
                       <td class="size">{size}</td>
                       <td class="modified">{modif}</td>

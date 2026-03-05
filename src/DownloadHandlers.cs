@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 
@@ -310,6 +311,143 @@ internal sealed class DownloadHandlers(HandlerContext ctx)
         catch (IOException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status500InternalServerError); }
 
         return Results.File(stream, mimeType, info.Name, enableRangeProcessing: true);
+    }
+
+    // POST /download-zip
+    // Bulk-downloads selected files from serveDir as a ZIP; blocked for wo.
+    internal async Task<IResult> BulkDownloadFiles(HttpContext httpCtx)
+    {
+        if (HandlerContext.GetRole(httpCtx) == "wo")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        BulkPathsRequest? req;
+        try { req = await JsonSerializer.DeserializeAsync<BulkPathsRequest>(httpCtx.Request.Body, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+        catch { return Results.BadRequest("Invalid JSON body."); }
+
+        if (req is null || req.Paths is null || req.Paths.Length == 0)
+            return Results.BadRequest("No paths specified.");
+
+        return BulkZip(httpCtx, req.Paths, resolveRoot: ctx.RootDir, validateRoot: ctx.RootDir);
+    }
+
+    // POST /upload-area/download-zip
+    // Bulk-downloads selected files from uploadDir as a ZIP; accessible to rw/admin.
+    internal async Task<IResult> BulkDownloadUploadAreaFiles(HttpContext httpCtx)
+    {
+        var role = HandlerContext.GetRole(httpCtx);
+        if (role == "ro" || role == "wo")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        BulkPathsRequest? req;
+        try { req = await JsonSerializer.DeserializeAsync<BulkPathsRequest>(httpCtx.Request.Body, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+        catch { return Results.BadRequest("Invalid JSON body."); }
+
+        if (req is null || req.Paths is null || req.Paths.Length == 0)
+            return Results.BadRequest("No paths specified.");
+
+        return BulkZip(httpCtx, req.Paths, resolveRoot: ctx.UploadDir, validateRoot: ctx.UploadDir);
+    }
+
+    // POST /my-uploads/download-zip
+    // Bulk-downloads selected files from the sender's own subfolder; blocked for wo.
+    internal async Task<IResult> BulkDownloadMyUploads(HttpContext httpCtx)
+    {
+        if (!ctx.PerSender)
+            return Results.NotFound("My Uploads requires --per-sender mode.");
+
+        if (HandlerContext.GetRole(httpCtx) == "wo")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        BulkPathsRequest? req;
+        try { req = await JsonSerializer.DeserializeAsync<BulkPathsRequest>(httpCtx.Request.Body, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+        catch { return Results.BadRequest("Invalid JSON body."); }
+
+        if (req is null || req.Paths is null || req.Paths.Length == 0)
+            return Results.BadRequest("No paths specified.");
+
+        var senderKey  = ctx.ResolveSenderKey(httpCtx);
+        var senderRoot = Path.Combine(ctx.UploadDir, senderKey);
+        return BulkZip(httpCtx, req.Paths, resolveRoot: senderRoot, validateRoot: ctx.UploadDir);
+    }
+
+    // POST /admin/uploads/download-zip
+    // Bulk-downloads selected files from uploadDir as a ZIP; admin only.
+    internal async Task<IResult> BulkDownloadAdminUploads(HttpContext httpCtx)
+    {
+        if (HandlerContext.GetRole(httpCtx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        BulkPathsRequest? req;
+        try { req = await JsonSerializer.DeserializeAsync<BulkPathsRequest>(httpCtx.Request.Body, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+        catch { return Results.BadRequest("Invalid JSON body."); }
+
+        if (req is null || req.Paths is null || req.Paths.Length == 0)
+            return Results.BadRequest("No paths specified.");
+
+        return BulkZip(httpCtx, req.Paths, resolveRoot: ctx.UploadDir, validateRoot: ctx.UploadDir);
+    }
+
+    /// <summary>
+    /// Shared bulk-ZIP helper. Resolves each path against <paramref name="resolveRoot"/>,
+    /// validates against <paramref name="validateRoot"/>, skips missing files, and streams
+    /// a ZIP archive named <c>selection.zip</c>.
+    /// </summary>
+    private IResult BulkZip(HttpContext httpCtx, string[] paths, string resolveRoot, string validateRoot)
+    {
+        var resolvedFiles = new List<(string entryName, string fullPath)>();
+        foreach (var p in paths)
+        {
+            string full;
+            try
+            {
+                full = Path.GetFullPath(Path.Combine(resolveRoot, p));
+                if (!full.StartsWith(validateRoot, StringComparison.OrdinalIgnoreCase))
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                if (HandlerContext.HasReparsePointInChain(validateRoot, full))
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+            catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+            if (File.Exists(full))
+                resolvedFiles.Add((p.Replace('\\', '/'), full));
+        }
+
+        if (resolvedFiles.Count == 0)
+            return Results.NotFound("No valid files found.");
+
+        if (ctx.MaxZipBytes > 0)
+        {
+            long totalBytes = 0;
+            foreach (var (_, fp) in resolvedFiles)
+                try { totalBytes += new FileInfo(fp).Length; } catch { }
+            if (totalBytes > ctx.MaxZipBytes)
+                return Results.StatusCode(StatusCodes.Status413RequestEntityTooLarge);
+        }
+
+        if (ctx.ZipSemaphore is not null && !ctx.ZipSemaphore.Wait(0))
+            return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+
+        var captured = resolvedFiles;
+        return Results.Stream(async stream =>
+        {
+            try
+            {
+                var syncIO = httpCtx.Features.Get<IHttpBodyControlFeature>();
+                if (syncIO != null) syncIO.AllowSynchronousIO = true;
+                using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
+                foreach (var (entryName, fullPath) in captured)
+                {
+                    var entry = archive.CreateEntry(entryName, CompressionLevel.Fastest);
+                    await using var entryStream = entry.Open();
+                    await using var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
+                    await fs.CopyToAsync(entryStream);
+                }
+            }
+            finally
+            {
+                ctx.ZipSemaphore?.Release();
+            }
+        }, "application/zip", "selection.zip");
     }
 
     // GET /info/{**subpath}

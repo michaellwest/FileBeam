@@ -139,6 +139,22 @@
     tr:hover .act-btn { opacity: 1; }
     .act-btn:hover { background: #252836; }
     table.drag-active { outline: 2px dashed #5ba4f5; outline-offset: -2px; }
+    .col-check { width:2rem; padding:.65rem .5rem .65rem 1rem; text-align:center; }
+    th.col-check { padding:.75rem .5rem .75rem 1rem; }
+    .file-select, #select-all { cursor:pointer; accent-color:#5ba4f5; width:1rem; height:1rem; }
+    #bulk-toolbar { display:none; position:sticky; bottom:1.5rem; margin-top:1.5rem;
+      background:#222536; border:1px solid #3a3f5a; border-radius:8px;
+      padding:.75rem 1.25rem; align-items:center; gap:1rem;
+      box-shadow:0 4px 20px rgba(0,0,0,.5); z-index:50; }
+    #bulk-toolbar.active { display:flex; }
+    #bulk-count { font-size:.9rem; color:#aaa; }
+    #bulk-count strong { color:#e0e0e0; }
+    .bulk-btn { padding:.45rem 1rem; border-radius:5px; border:none;
+      font-size:.85rem; font-weight:600; cursor:pointer; }
+    #bulk-dl-btn { background:#5ba4f5; color:#fff; }
+    #bulk-dl-btn:hover { background:#3d8fe0; }
+    #bulk-del-btn { background:transparent; border:1px solid #e53e3e; color:#e53e3e; }
+    #bulk-del-btn:hover { background:#3a1a1a; }
     /* ── Preview panel ── */
     #preview-backdrop {
       position: fixed; inset: 0; background: rgba(0,0,0,.65); z-index: 100;
@@ -179,7 +195,7 @@
   <div id="disk-info"></div>
 </header>
 <div class="breadcrumb">{{BREADCRUMB}}</div>
-<table>
+<table {{TABLE_ATTRS}}>
   <thead>
 {{THEAD}}
   </thead>
@@ -187,6 +203,12 @@
 {{ROWS}}
   </tbody>
 </table>
+
+<div id="bulk-toolbar">
+  <span id="bulk-count"><strong id="bulk-count-n">0</strong> file(s) selected</span>
+  <button id="bulk-dl-btn" class="bulk-btn">&#x2B07; Download as ZIP</button>
+  <button id="bulk-del-btn" class="bulk-btn">&#x1F5D1; Delete selected</button>
+</div>
 
 {{UPLOAD_SECTION}}
 

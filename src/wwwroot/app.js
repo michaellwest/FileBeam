@@ -435,3 +435,101 @@ window.addEventListener('pagehide', () => {
   _diskAbort.abort();
   if (_sseSource) { _sseSource.close(); _sseSource = null; }
 });
+
+// ── Bulk select + download/delete ─────────────────────────────────────────────
+(function () {
+  const table   = document.querySelector('table[data-bulk-dl]');
+  if (!table) return;                                   // not a directory view
+
+  const bulkDlEndpoint  = table.dataset.bulkDl  || '';
+  const bulkDelEndpoint = table.dataset.bulkDel || '';
+  const toolbar    = document.getElementById('bulk-toolbar');
+  const countLabel = document.getElementById('bulk-count-n');
+  const dlBtn      = document.getElementById('bulk-dl-btn');
+  const delBtn     = document.getElementById('bulk-del-btn');
+  const selectAll  = document.getElementById('select-all');
+
+  // Hide delete button when the endpoint is absent (non-admin)
+  if (!bulkDelEndpoint && delBtn) delBtn.style.display = 'none';
+
+  function getChecked() {
+    return Array.from(table.querySelectorAll('.file-select:checked'));
+  }
+
+  function updateToolbar() {
+    const checked = getChecked();
+    const n = checked.length;
+    countLabel.textContent = n;
+    toolbar.classList.toggle('active', n > 0);
+
+    // Update select-all indeterminate state
+    const all = table.querySelectorAll('.file-select');
+    if (all.length === 0) {
+      selectAll.indeterminate = false;
+      selectAll.checked = false;
+    } else if (n === 0) {
+      selectAll.indeterminate = false;
+      selectAll.checked = false;
+    } else if (n === all.length) {
+      selectAll.indeterminate = false;
+      selectAll.checked = true;
+    } else {
+      selectAll.indeterminate = true;
+    }
+  }
+
+  // Delegate checkbox changes inside the table
+  table.addEventListener('change', function (e) {
+    if (e.target.classList.contains('file-select') || e.target.id === 'select-all') {
+      if (e.target.id === 'select-all') {
+        const checked = e.target.checked;
+        table.querySelectorAll('.file-select').forEach(cb => { cb.checked = checked; });
+      }
+      updateToolbar();
+    }
+  });
+
+  // Bulk download as ZIP
+  if (dlBtn) dlBtn.addEventListener('click', async function () {
+    const paths = getChecked().map(cb => cb.dataset.path);
+    if (!paths.length) return;
+    try {
+      const res = await fetch(bulkDlEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken, ...authHeaders() },
+        body: JSON.stringify({ paths })
+      });
+      if (!res.ok) { alert('Download failed: ' + res.status); return; }
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href = url; a.download = 'selection.zip';
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+    } catch (err) {
+      alert('Download error: ' + err.message);
+    }
+  });
+
+  // Bulk delete
+  if (delBtn && bulkDelEndpoint) delBtn.addEventListener('click', async function () {
+    const paths = getChecked().map(cb => cb.dataset.path);
+    if (!paths.length) return;
+    if (!confirm(`Delete ${paths.length} file(s)? This cannot be undone.`)) return;
+    try {
+      const res = await fetch(bulkDelEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken, ...authHeaders() },
+        body: JSON.stringify({ paths })
+      });
+      if (!res.ok) { alert('Delete request failed: ' + res.status); return; }
+      const data = await res.json();
+      if (data.failed > 0) {
+        alert(`Deleted ${data.deleted} file(s). ${data.failed} failed:\n` + data.errors.join('\n'));
+      }
+      if (data.deleted > 0) window.location.reload();
+    } catch (err) {
+      alert('Delete error: ' + err.message);
+    }
+  });
+})();

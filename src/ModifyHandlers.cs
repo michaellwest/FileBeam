@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 
 namespace FileBeam;
@@ -357,6 +358,79 @@ internal sealed class ModifyHandlers(HandlerContext ctx)
             ? "/admin/uploads"
             : $"/admin/uploads/browse/{parentSubpath}";
         return Results.Redirect(redirectUrl);
+    }
+
+    // POST /admin/delete-bulk
+    // Bulk-deletes selected files from serveDir. Admin only.
+    internal async Task<IResult> BulkDeleteFiles(HttpContext httpCtx)
+    {
+        if (HandlerContext.GetRole(httpCtx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        BulkPathsRequest? req;
+        try { req = await JsonSerializer.DeserializeAsync<BulkPathsRequest>(httpCtx.Request.Body, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+        catch { return Results.BadRequest("Invalid JSON body."); }
+
+        if (req is null || req.Paths is null || req.Paths.Length == 0)
+            return Results.BadRequest("No paths specified.");
+
+        return BulkDelete(req.Paths, resolveRoot: ctx.RootDir, validateRoot: ctx.RootDir);
+    }
+
+    // POST /admin/uploads/delete-bulk
+    // Bulk-deletes selected files from uploadDir. Admin only.
+    internal async Task<IResult> BulkDeleteAdminUploads(HttpContext httpCtx)
+    {
+        if (HandlerContext.GetRole(httpCtx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        BulkPathsRequest? req;
+        try { req = await JsonSerializer.DeserializeAsync<BulkPathsRequest>(httpCtx.Request.Body, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+        catch { return Results.BadRequest("Invalid JSON body."); }
+
+        if (req is null || req.Paths is null || req.Paths.Length == 0)
+            return Results.BadRequest("No paths specified.");
+
+        return BulkDelete(req.Paths, resolveRoot: ctx.UploadDir, validateRoot: ctx.UploadDir);
+    }
+
+    private IResult BulkDelete(string[] paths, string resolveRoot, string validateRoot)
+    {
+        int deleted = 0, failed = 0;
+        var errors = new List<string>();
+
+        foreach (var p in paths)
+        {
+            string full;
+            try
+            {
+                full = Path.GetFullPath(Path.Combine(resolveRoot, p));
+                if (!full.StartsWith(validateRoot, StringComparison.OrdinalIgnoreCase))
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                if (HandlerContext.HasReparsePointInChain(validateRoot, full))
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+            catch { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+            try
+            {
+                if (!File.Exists(full))
+                {
+                    failed++;
+                    errors.Add($"{p}: File not found.");
+                    continue;
+                }
+                File.Delete(full);
+                deleted++;
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                errors.Add($"{p}: {ex.Message}");
+            }
+        }
+
+        return Results.Json(new { deleted, failed, errors });
     }
 
     // POST /admin/uploads/rename-dir/{**subpath}

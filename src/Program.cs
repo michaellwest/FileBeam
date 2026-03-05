@@ -1048,6 +1048,8 @@ app.MapPost("/delete/{**subpath}",  handlers.DeleteFile);
 app.MapPost("/delete-dir/{**subpath}", handlers.DeleteDir);
 app.MapPost("/rename/{**subpath}",     handlers.RenameFile);
 app.MapPost("/rename-dir/{**subpath}", handlers.RenameDir);
+app.MapPost("/download-zip",        (Delegate)handlers.BulkDownloadFiles);
+app.MapPost("/admin/delete-bulk",   (Delegate)handlers.BulkDeleteFiles);
 app.MapPost("/share/{**subpath}",   handlers.CreateShareLink);
 app.MapGet("/s/{token}",            handlers.RedeemShareLink);
 app.MapPost("/mkdir/{**subpath}",   handlers.MkDir);
@@ -1056,6 +1058,7 @@ app.MapGet("/upload-area/browse/{**subpath}",       handlers.BrowseUploadArea);
 app.MapGet("/upload-area/download/{**subpath}",     handlers.DownloadUploadAreaFile);
 app.MapGet("/upload-area/download-zip/{**subpath}", handlers.DownloadUploadAreaZip);
 app.MapPost("/upload-area/upload/{**subpath}",      handlers.UploadToUploadArea);
+app.MapPost("/upload-area/download-zip",            (Delegate)handlers.BulkDownloadUploadAreaFiles);
 app.MapGet("/disk-space",                           handlers.DiskSpace);
 app.MapGet("/events",               handlers.FileEvents);
 
@@ -1069,6 +1072,7 @@ app.MapPost("/my-uploads/upload/{**subpath}",     handlers.UploadToMyUploads);
 app.MapPost("/my-uploads/delete/{**subpath}",         handlers.DeleteMyUpload);
 app.MapPost("/my-uploads/rename/{**subpath}",         handlers.RenameMyUpload);
 app.MapPost("/my-uploads/rename-dir/{**subpath}",     handlers.RenameMyUploadDir);
+app.MapPost("/my-uploads/download-zip",               (Delegate)handlers.BulkDownloadMyUploads);
 
 // ── Admin: full upload dir browse + share token list + revocation ──────────────
 app.MapGet("/admin/uploads",                            handlers.BrowseAdminUploads);
@@ -1077,6 +1081,8 @@ app.MapGet("/admin/uploads/download/{**subpath}",       handlers.DownloadAdminUp
 app.MapPost("/admin/uploads/delete/{**subpath}",            handlers.DeleteAdminUpload);
 app.MapPost("/admin/uploads/rename/{**subpath}",            handlers.RenameAdminUpload);
 app.MapPost("/admin/uploads/rename-dir/{**subpath}",        handlers.RenameAdminUploadDir);
+app.MapPost("/admin/uploads/download-zip",                  (Delegate)handlers.BulkDownloadAdminUploads);
+app.MapPost("/admin/uploads/delete-bulk",                   (Delegate)handlers.BulkDeleteAdminUploads);
 // catch-all for direct subpath access (must be after the more-specific routes)
 app.MapGet("/admin/uploads/{**subpath}",                handlers.BrowseAdminUploads);
 app.MapGet("/admin/shares",                 handlers.ListShareTokens);

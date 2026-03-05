@@ -94,6 +94,10 @@ public class RouteHandlers
     public IResult DownloadAdminUpload(HttpContext ctx, string? subpath)      => _download.DownloadAdminUpload(ctx, subpath);
     public Task<IResult> InfoFile(HttpContext ctx, string? subpath)           => _download.InfoFile(ctx, subpath);
     public Task<IResult> InfoMyUpload(HttpContext ctx, string? subpath)       => _download.InfoMyUpload(ctx, subpath);
+    public Task<IResult> BulkDownloadFiles(HttpContext ctx)                   => _download.BulkDownloadFiles(ctx);
+    public Task<IResult> BulkDownloadUploadAreaFiles(HttpContext ctx)         => _download.BulkDownloadUploadAreaFiles(ctx);
+    public Task<IResult> BulkDownloadMyUploads(HttpContext ctx)               => _download.BulkDownloadMyUploads(ctx);
+    public Task<IResult> BulkDownloadAdminUploads(HttpContext ctx)            => _download.BulkDownloadAdminUploads(ctx);
 
     // ── Upload ─────────────────────────────────────────────────────────────────
     public Task<IResult> UploadFiles(HttpContext ctx, string? subpath)        => _upload.UploadFiles(ctx, subpath);
@@ -113,6 +117,8 @@ public class RouteHandlers
     public IResult DeleteAdminUpload(HttpContext ctx, string? subpath)            => _modify.DeleteAdminUpload(ctx, subpath);
     public Task<IResult> RenameAdminUpload(HttpContext ctx, string? subpath)      => _modify.RenameAdminUpload(ctx, subpath);
     public Task<IResult> RenameAdminUploadDir(HttpContext ctx, string? subpath)   => _modify.RenameAdminUploadDir(ctx, subpath);
+    public Task<IResult> BulkDeleteFiles(HttpContext ctx)                         => _modify.BulkDeleteFiles(ctx);
+    public Task<IResult> BulkDeleteAdminUploads(HttpContext ctx)                  => _modify.BulkDeleteAdminUploads(ctx);
 
     // ── Admin ──────────────────────────────────────────────────────────────────
     public IResult CreateShareLink(HttpContext ctx, string? subpath)   => _admin.CreateShareLink(ctx, subpath);

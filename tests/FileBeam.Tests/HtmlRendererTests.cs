@@ -285,6 +285,95 @@ public class HtmlRendererTests
             tmpDir.Delete();
         }
     }
+
+    // ── Bulk select — thead / rows / table attrs ──────────────────────────────
+
+    [Fact]
+    public void Render_THead_ContainsSelectAllCheckbox()
+    {
+        var html = HtmlRenderer.RenderDirectory("", NoDirs, NoFiles);
+
+        Assert.Contains("id=\"select-all\"", html);
+        Assert.Contains("class=\"col-check\"", html);
+    }
+
+    [Fact]
+    public void Render_FileRow_ContainsCheckboxWithDataPath()
+    {
+        var tmpDir  = Directory.CreateTempSubdirectory();
+        var tmpFile = new FileInfo(Path.Combine(tmpDir.FullName, "report.pdf"));
+        tmpFile.WriteAllText("dummy");
+
+        try
+        {
+            var html = HtmlRenderer.RenderDirectory("", NoDirs, [tmpFile]);
+
+            Assert.Contains("class=\"file-select\"", html);
+            Assert.Contains("data-path=\"report.pdf\"", html);
+        }
+        finally { tmpFile.Delete(); tmpDir.Delete(); }
+    }
+
+    [Fact]
+    public void Render_DirRow_NoCheckboxWithDataPath()
+    {
+        var tmpDir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), "sub_" + Guid.NewGuid().ToString("N")));
+        tmpDir.Create();
+
+        try
+        {
+            var html = HtmlRenderer.RenderDirectory("", [tmpDir], NoFiles);
+
+            // Directory rows should have an empty col-check td, not a file-select checkbox
+            Assert.DoesNotContain("class=\"file-select\"", html);
+        }
+        finally { tmpDir.Delete(); }
+    }
+
+    [Fact]
+    public void Render_EmptyDir_ColSpanIsFive()
+    {
+        var html = HtmlRenderer.RenderDirectory("", NoDirs, NoFiles);
+
+        // No expiry: colspan should be 5 (check + name + size + modified + actions)
+        Assert.Contains("colspan=\"5\"", html);
+    }
+
+    [Fact]
+    public void Render_EmptyDirWithExpiry_ColSpanIsSix()
+    {
+        var html = HtmlRenderer.RenderDirectory("", NoDirs, NoFiles, uploadTtl: TimeSpan.FromHours(1));
+
+        // With expiry column: colspan should be 6
+        Assert.Contains("colspan=\"6\"", html);
+    }
+
+    [Fact]
+    public void Render_AdminRole_TableHasBulkDelAttribute()
+    {
+        var html = HtmlRenderer.RenderDirectory("", NoDirs, NoFiles, role: "admin");
+
+        Assert.Contains("data-bulk-del=\"/admin/delete-bulk\"", html);
+        Assert.Contains("data-bulk-dl=\"/download-zip\"", html);
+    }
+
+    [Fact]
+    public void Render_NonAdminRole_TableNoBulkDelAttribute()
+    {
+        var html = HtmlRenderer.RenderDirectory("", NoDirs, NoFiles, role: "rw");
+
+        Assert.DoesNotContain("data-bulk-del=", html);
+        Assert.Contains("data-bulk-dl=\"/download-zip\"", html);
+    }
+
+    [Fact]
+    public void Render_UploadAreaUrlBase_TableHasCorrectBulkEndpoints()
+    {
+        var html = HtmlRenderer.RenderDirectory("", NoDirs, NoFiles, role: "admin", urlBase: "upload-area");
+
+        Assert.Contains("data-bulk-dl=\"/upload-area/download-zip\"", html);
+        Assert.Contains("data-bulk-del=\"/admin/uploads/delete-bulk\"", html);
+    }
 }
 
 // Convenience extension to avoid creating real files on disk for simple size tests
