@@ -1,0 +1,24 @@
+# FileBeam — Windows Containers Compose
+#
+# Used automatically by compose.ps1 / compose.sh when Docker Desktop is in Windows containers mode.
+# Do not invoke directly unless you are certain you want Windows containers.
+#
+# Switch Docker Desktop to Windows containers: right-click the tray icon → "Switch to Windows containers…"
+#
+# Files are served from the .\share directory next to this file.
+#
+# Inside a container the QR code shows the container's internal IP.
+# Use --advertise-ip to override with your host machine's LAN IP so the QR is scannable:
+#   command: ["filebeam.exe", "--download", "C:\\srv\\share\\download", "--port", "8080", "--advertise-ip", "192.168.1.100"]
+
+services:
+  filebeam:
+    build:
+      context: .
+      dockerfile: Dockerfile.windows
+    ports:
+      - "8080:8080"
+    volumes:
+      - .\share\download:C:\srv\share\download
+      - .\share\upload:C:\srv\share\upload
+    restart: unless-stopped

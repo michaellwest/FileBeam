@@ -1,0 +1,22 @@
+# ── Build ───────────────────────────────────────────────────────────────────
+FROM mcr.microsoft.com/dotnet/sdk:10.0-windowsservercore-ltsc2022 AS build
+WORKDIR C:\repo
+COPY src\ .\src\
+RUN dotnet publish src\FileBeam.csproj ^
+    -c Release -r win-x64 --self-contained true ^
+    -p:PublishSingleFile=true ^
+    -p:EnableCompressionInSingleFile=true ^
+    -o C:\out
+
+# ── Runtime ─────────────────────────────────────────────────────────────────
+# nanoserver is the minimal Windows base; self-contained binary carries all .NET deps
+FROM mcr.microsoft.com/windows/nanoserver:ltsc2022
+WORKDIR C:\srv
+COPY --from=build C:\out\filebeam.exe .
+RUN mkdir C:\srv\share\download && mkdir C:\srv\share\upload
+
+EXPOSE 8080
+
+VOLUME ["C:\\srv\\share\\download", "C:\\srv\\share\\upload"]
+
+ENTRYPOINT ["filebeam.exe", "--download", "C:\\srv\\share\\download", "--port", "8080"]

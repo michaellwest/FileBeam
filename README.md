@@ -517,6 +517,24 @@ services:
     command: ["--upload", "/srv/drop", "--per-sender"]
 ```
 
+### Docker — Windows Containers
+
+Docker Desktop on Windows supports both Linux containers (default) and Windows containers.
+The included wrapper scripts detect the active mode automatically and dispatch to the correct compose file:
+
+| Host | Command |
+|------|---------|
+| Windows PowerShell | `.\compose.ps1 up -d` |
+| Linux / macOS / WSL | `bash compose.sh up -d` |
+
+The scripts call `docker info --format '{{.OSType}}'` to determine the daemon mode:
+- **Linux mode** → uses `docker-compose.yml` + `Dockerfile` (linux-x64, `runtime-deps` base image)
+- **Windows mode** → uses `docker-compose.windows.yml` + `Dockerfile.windows` (win-x64, `nanoserver:ltsc2022` base image)
+
+To switch Docker Desktop to Windows containers mode, right-click the Docker tray icon and select **"Switch to Windows containers…"**.
+
+> **Note:** Windows container images are substantially larger than Linux images and require a Windows host running a compatible OS version (ltsc2022). Linux containers are recommended for most deployments.
+
 ---
 
 ## Build
