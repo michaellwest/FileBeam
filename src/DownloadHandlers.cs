@@ -56,18 +56,31 @@ internal sealed class DownloadHandlers(HandlerContext ctx)
             ? Path.GetFileName(ctx.RootDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
             : Path.GetFileName(resolved.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
 
+        if (ctx.MaxZipBytes > 0 && HandlerContext.GetDirectorySize(resolved) > ctx.MaxZipBytes)
+            return Results.StatusCode(StatusCodes.Status413RequestEntityTooLarge);
+
+        if (ctx.ZipSemaphore is not null && !ctx.ZipSemaphore.Wait(0))
+            return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+
         return Results.Stream(async stream =>
         {
-            var syncIO = httpCtx.Features.Get<IHttpBodyControlFeature>();
-            if (syncIO != null) syncIO.AllowSynchronousIO = true;
-            using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
-            foreach (var file in Directory.EnumerateFiles(resolved, "*", SearchOption.AllDirectories))
+            try
             {
-                var entryName = Path.GetRelativePath(resolved, file).Replace('\\', '/');
-                var entry     = archive.CreateEntry(entryName, CompressionLevel.Fastest);
-                await using var entryStream = entry.Open();
-                await using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
-                await fs.CopyToAsync(entryStream);
+                var syncIO = httpCtx.Features.Get<IHttpBodyControlFeature>();
+                if (syncIO != null) syncIO.AllowSynchronousIO = true;
+                using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
+                foreach (var file in Directory.EnumerateFiles(resolved, "*", SearchOption.AllDirectories))
+                {
+                    var entryName = Path.GetRelativePath(resolved, file).Replace('\\', '/');
+                    var entry     = archive.CreateEntry(entryName, CompressionLevel.Fastest);
+                    await using var entryStream = entry.Open();
+                    await using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
+                    await fs.CopyToAsync(entryStream);
+                }
+            }
+            finally
+            {
+                ctx.ZipSemaphore?.Release();
             }
         }, "application/zip", $"{folderName}.zip");
     }
@@ -135,18 +148,31 @@ internal sealed class DownloadHandlers(HandlerContext ctx)
             ? Path.GetFileName(ctx.UploadDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
             : Path.GetFileName(resolved.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
 
+        if (ctx.MaxZipBytes > 0 && HandlerContext.GetDirectorySize(resolved) > ctx.MaxZipBytes)
+            return Results.StatusCode(StatusCodes.Status413RequestEntityTooLarge);
+
+        if (ctx.ZipSemaphore is not null && !ctx.ZipSemaphore.Wait(0))
+            return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+
         return Results.Stream(async stream =>
         {
-            var syncIO = httpCtx.Features.Get<IHttpBodyControlFeature>();
-            if (syncIO != null) syncIO.AllowSynchronousIO = true;
-            using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
-            foreach (var file in Directory.EnumerateFiles(resolved, "*", SearchOption.AllDirectories))
+            try
             {
-                var entryName = Path.GetRelativePath(resolved, file).Replace('\\', '/');
-                var entry     = archive.CreateEntry(entryName, CompressionLevel.Fastest);
-                await using var entryStream = entry.Open();
-                await using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
-                await fs.CopyToAsync(entryStream);
+                var syncIO = httpCtx.Features.Get<IHttpBodyControlFeature>();
+                if (syncIO != null) syncIO.AllowSynchronousIO = true;
+                using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
+                foreach (var file in Directory.EnumerateFiles(resolved, "*", SearchOption.AllDirectories))
+                {
+                    var entryName = Path.GetRelativePath(resolved, file).Replace('\\', '/');
+                    var entry     = archive.CreateEntry(entryName, CompressionLevel.Fastest);
+                    await using var entryStream = entry.Open();
+                    await using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
+                    await fs.CopyToAsync(entryStream);
+                }
+            }
+            finally
+            {
+                ctx.ZipSemaphore?.Release();
             }
         }, "application/zip", $"{folderName}.zip");
     }
@@ -221,18 +247,31 @@ internal sealed class DownloadHandlers(HandlerContext ctx)
             ? senderKey
             : Path.GetFileName(resolved.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
 
+        if (ctx.MaxZipBytes > 0 && HandlerContext.GetDirectorySize(resolved) > ctx.MaxZipBytes)
+            return Results.StatusCode(StatusCodes.Status413RequestEntityTooLarge);
+
+        if (ctx.ZipSemaphore is not null && !ctx.ZipSemaphore.Wait(0))
+            return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+
         return Results.Stream(async stream =>
         {
-            var syncIO = httpCtx.Features.Get<IHttpBodyControlFeature>();
-            if (syncIO != null) syncIO.AllowSynchronousIO = true;
-            using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
-            foreach (var file in Directory.EnumerateFiles(resolved, "*", SearchOption.AllDirectories))
+            try
             {
-                var entryName = Path.GetRelativePath(resolved, file).Replace('\\', '/');
-                var entry     = archive.CreateEntry(entryName, CompressionLevel.Fastest);
-                await using var entryStream = entry.Open();
-                await using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
-                await fs.CopyToAsync(entryStream);
+                var syncIO = httpCtx.Features.Get<IHttpBodyControlFeature>();
+                if (syncIO != null) syncIO.AllowSynchronousIO = true;
+                using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
+                foreach (var file in Directory.EnumerateFiles(resolved, "*", SearchOption.AllDirectories))
+                {
+                    var entryName = Path.GetRelativePath(resolved, file).Replace('\\', '/');
+                    var entry     = archive.CreateEntry(entryName, CompressionLevel.Fastest);
+                    await using var entryStream = entry.Open();
+                    await using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
+                    await fs.CopyToAsync(entryStream);
+                }
+            }
+            finally
+            {
+                ctx.ZipSemaphore?.Release();
             }
         }, "application/zip", $"{folderName}.zip");
     }

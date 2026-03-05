@@ -30,7 +30,9 @@ internal sealed class HandlerContext(
     string? auditLogPath = null,
     TimeSpan? uploadTtl = null,
     string? adminExemptPath = null,
-    SessionRegistry? sessionRegistry = null)
+    SessionRegistry? sessionRegistry = null,
+    int maxConcurrentZips = 2,
+    long maxZipBytes = 0)
 {
     internal string        RootDir                  => rootDir;
     internal string        UploadDir                => uploadDir;
@@ -58,6 +60,15 @@ internal sealed class HandlerContext(
 
     internal bool HasAuditLog => !string.IsNullOrEmpty(auditLogPath) && auditLogPath != "-";
     internal bool HasSessions => sessionRegistry is not null;
+
+    internal int  MaxConcurrentZips => maxConcurrentZips;
+    internal long MaxZipBytes       => maxZipBytes;
+
+    /// <summary>
+    /// Semaphore capping simultaneous ZIP streams. Null when <see cref="MaxConcurrentZips"/> is 0 (unlimited).
+    /// </summary>
+    internal SemaphoreSlim? ZipSemaphore { get; } =
+        maxConcurrentZips > 0 ? new SemaphoreSlim(maxConcurrentZips, maxConcurrentZips) : null;
 
     // Short-lived cache for GetDirectorySize used by DiskSpace (refreshed at most once per 10 s).
     // Shared between UploadHandlers (quota tracking) and DiskSpace endpoint.

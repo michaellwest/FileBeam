@@ -54,6 +54,8 @@ filebeam.exe --download "./share/download" --port 9000
 | `--tls-pfx-password`   |        | _(none)_             | Password for the PFX file (optional; omit if the file has no password) |
 | `--log-level`          |        | `info`               | Console verbosity: `info` (default) or `debug`                    |
 | `--upload-ttl`         |        | _(none)_             | Auto-delete uploaded files after this duration (`30m`, `24h`, `7d`). When `--per-sender` is active the admin's named subfolder is exempt. |
+| `--max-concurrent-zips` |       | `2`                  | Max simultaneous ZIP downloads; excess requests return 503. Set to `0` for unlimited. |
+| `--max-zip-size`       |        | _(none)_             | Reject ZIP requests for directories exceeding this size (`10GB`, `500MB`); returns 413. |
 | `--config`             |        | _(none)_             | Path to a config file (see [Config file](#config-file))           |
 | `--print-config`       |        | _(off)_              | Print the fully resolved config as JSON and exit (no server start) |
 

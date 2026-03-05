@@ -35,6 +35,8 @@ int     shareTtl            = 3600; // default share link TTL in seconds
 int     rateLimit           = 60;  // requests per minute per IP
 string  logLevel            = "info"; // info | debug
 TimeSpan? uploadTtl         = null; // auto-delete TTL for uploaded files; null = disabled
+int     maxConcurrentZips   = 2;   // max simultaneous ZIP streams; 0 = unlimited
+long    maxZipBytes         = 0;   // max directory size for ZIP; 0 = unlimited
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -120,6 +122,18 @@ for (int i = 0; i < args.Length; i++)
         }
         uploadTtl = parsedTtl;
     }
+    else if (args[i] == "--max-concurrent-zips" && i + 1 < args.Length)
+        maxConcurrentZips = int.TryParse(args[++i], out var mz) ? Math.Max(0, mz) : 2;
+    else if (args[i] == "--max-zip-size" && i + 1 < args.Length)
+    {
+        var raw = args[++i];
+        if (!TryParseSize(raw, out maxZipBytes))
+        {
+            AnsiConsole.MarkupLine($"[red]Error:[/] --max-zip-size invalid value '{Markup.Escape(raw)}'. " +
+                "Use e.g. 10GB, 500MB, or 'unlimited'.");
+            return 1;
+        }
+    }
     else if (args[i] == "--print-config")
         printConfig = true;
 }
@@ -171,6 +185,10 @@ for (int i = 0; i < args.Length; i++)
         auditLogPath ??= cfg!.AuditLog;
         if (uploadTtl is null && cfg!.UploadTtl is not null
             && TryParseDuration(cfg.UploadTtl, out var cfgUploadTtl)) uploadTtl = cfgUploadTtl;
+        if (maxConcurrentZips == 2 && cfg!.MaxConcurrentZips.HasValue)
+            maxConcurrentZips = Math.Max(0, cfg.MaxConcurrentZips.Value);
+        if (maxZipBytes == 0 && cfg!.MaxZipSize is not null)
+            TryParseSize(cfg.MaxZipSize, out maxZipBytes);
 
         AnsiConsole.MarkupLine($"[grey]Config loaded: {Markup.Escape(configPath)}[/]");
     }
@@ -389,34 +407,46 @@ else if (hasPfx)
 if (printConfig)
 {
     Console.WriteLine(FileBeamConfig.ToDisplayJson(
-        download:        serveDir,
-        upload:          uploadDir,
-        port:            port,
-        adminUsername:   adminUsername != "admin" ? adminUsername : null,
-        invitesFile:     cliInvitesFile,
-        readOnly:        readOnly,
-        perSender:       perSender,
-        maxFileSize:     maxFileSize,
-        maxUploadBytes:  maxUploadBytes,
-        maxUploadTotal:  maxUploadTotal,
-        maxUploadSize:   maxUploadSize,
-        tlsCert:         cliTlsCert,
-        tlsKey:          cliTlsKey,
-        tlsPfx:          cliTlsPfx,
-        tlsPfxPassword:  cliTlsPfxPassword,
-        shareTtl:        shareTtl,
-        auditLog:        auditLogPath,
-        auditLogMaxSize: auditLogMaxSize,
-        rateLimit:       rateLimit,
-        logLevel:        logLevel,
-        uploadTtl:       uploadTtl.HasValue ? FormatDuration(uploadTtl.Value) : null));
+        download:          serveDir,
+        upload:            uploadDir,
+        port:              port,
+        adminUsername:     adminUsername != "admin" ? adminUsername : null,
+        invitesFile:       cliInvitesFile,
+        readOnly:          readOnly,
+        perSender:         perSender,
+        maxFileSize:       maxFileSize,
+        maxUploadBytes:    maxUploadBytes,
+        maxUploadTotal:    maxUploadTotal,
+        maxUploadSize:     maxUploadSize,
+        tlsCert:           cliTlsCert,
+        tlsKey:            cliTlsKey,
+        tlsPfx:            cliTlsPfx,
+        tlsPfxPassword:    cliTlsPfxPassword,
+        shareTtl:          shareTtl,
+        auditLog:          auditLogPath,
+        auditLogMaxSize:   auditLogMaxSize,
+        rateLimit:         rateLimit,
+        logLevel:          logLevel,
+        uploadTtl:         uploadTtl.HasValue ? FormatDuration(uploadTtl.Value) : null,
+        maxConcurrentZips: maxConcurrentZips,
+        maxZipBytes:       maxZipBytes));
     return 0;
 }
 
 // ── Resolve LAN IPs ────────────────────────────────────────────────────────────
+/*
 var ips = NetworkInterface.GetAllNetworkInterfaces()
     .Where(n => n.OperationalStatus == OperationalStatus.Up
              && n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+    .SelectMany(n => n.GetIPProperties().UnicastAddresses)
+    .Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork)
+    .Select(a => a.Address.ToString())
+    .ToList();
+*/
+var ips = NetworkInterface.GetAllNetworkInterfaces()
+    .Where(n => n.OperationalStatus == OperationalStatus.Up
+             && n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+    .Where(n => n.GetIPProperties().GatewayAddresses.Any()) // Must have a gateway
     .SelectMany(n => n.GetIPProperties().UnicastAddresses)
     .Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork)
     .Select(a => a.Address.ToString())
@@ -459,7 +489,7 @@ var qrUrl  = ips.Count > 0 ? $"{scheme}://{ips[0]}:{port}" : $"{scheme}://localh
 using var qrGen  = new QRCodeGenerator();
 var qrData       = qrGen.CreateQrCode(qrUrl, QRCodeGenerator.ECCLevel.L);
 var asciiQr      = new AsciiQRCode(qrData);
-AnsiConsole.WriteLine(asciiQr.GetGraphic(1, "█", " "));
+AnsiConsole.WriteLine(asciiQr.GetGraphicSmall());
 
 AnsiConsole.MarkupLine("[grey]Press Ctrl+C to stop.[/]\n");
 
@@ -549,50 +579,54 @@ Action<string, string>? debugLog = logLevel == "debug"
     : null;
 
 var configJson = FileBeamConfig.ToDisplayJson(
-    download:        serveDir,
-    upload:          uploadDir,
-    port:            port,
-    adminUsername:   adminUsername != "admin" ? adminUsername : null,
-    invitesFile:     cliInvitesFile,
-    readOnly:        readOnly,
-    perSender:       perSender,
-    maxFileSize:     maxFileSize,
-    maxUploadBytes:  maxUploadBytes,
-    maxUploadTotal:  maxUploadTotal,
-    maxUploadSize:   maxUploadSize,
-    tlsCert:         cliTlsCert,
-    tlsKey:          cliTlsKey,
-    tlsPfx:          cliTlsPfx,
-    tlsPfxPassword:  cliTlsPfxPassword,
-    shareTtl:        shareTtl,
-    auditLog:        auditLogPath,
-    auditLogMaxSize: auditLogMaxSize,
-    rateLimit:       rateLimit,
-    logLevel:        logLevel,
-    uploadTtl:       uploadTtl.HasValue ? FormatDuration(uploadTtl.Value) : null);
+    download:          serveDir,
+    upload:            uploadDir,
+    port:              port,
+    adminUsername:     adminUsername != "admin" ? adminUsername : null,
+    invitesFile:       cliInvitesFile,
+    readOnly:          readOnly,
+    perSender:         perSender,
+    maxFileSize:       maxFileSize,
+    maxUploadBytes:    maxUploadBytes,
+    maxUploadTotal:    maxUploadTotal,
+    maxUploadSize:     maxUploadSize,
+    tlsCert:           cliTlsCert,
+    tlsKey:            cliTlsKey,
+    tlsPfx:            cliTlsPfx,
+    tlsPfxPassword:    cliTlsPfxPassword,
+    shareTtl:          shareTtl,
+    auditLog:          auditLogPath,
+    auditLogMaxSize:   auditLogMaxSize,
+    rateLimit:         rateLimit,
+    logLevel:          logLevel,
+    uploadTtl:         uploadTtl.HasValue ? FormatDuration(uploadTtl.Value) : null,
+    maxConcurrentZips: maxConcurrentZips,
+    maxZipBytes:       maxZipBytes);
 
 var cliCommand = FileBeamConfig.ToCliCommand(
-    download:        serveDir,
-    upload:          uploadDir,
-    port:            port,
-    adminUsername:   adminUsername != "admin" ? adminUsername : null,
-    invitesFile:     cliInvitesFile,
-    readOnly:        readOnly,
-    perSender:       perSender,
-    maxFileSize:     maxFileSize,
-    maxUploadBytes:  maxUploadBytes,
-    maxUploadTotal:  maxUploadTotal,
-    maxUploadSize:   maxUploadSize,
-    tlsCert:         cliTlsCert,
-    tlsKey:          cliTlsKey,
-    tlsPfx:          cliTlsPfx,
-    tlsPfxPassword:  cliTlsPfxPassword,
-    shareTtl:        shareTtl,
-    auditLog:        auditLogPath,
-    auditLogMaxSize: auditLogMaxSize,
-    rateLimit:       rateLimit,
-    logLevel:        logLevel,
-    uploadTtl:       uploadTtl.HasValue ? FormatDuration(uploadTtl.Value) : null);
+    download:          serveDir,
+    upload:            uploadDir,
+    port:              port,
+    adminUsername:     adminUsername != "admin" ? adminUsername : null,
+    invitesFile:       cliInvitesFile,
+    readOnly:          readOnly,
+    perSender:         perSender,
+    maxFileSize:       maxFileSize,
+    maxUploadBytes:    maxUploadBytes,
+    maxUploadTotal:    maxUploadTotal,
+    maxUploadSize:     maxUploadSize,
+    tlsCert:           cliTlsCert,
+    tlsKey:            cliTlsKey,
+    tlsPfx:            cliTlsPfx,
+    tlsPfxPassword:    cliTlsPfxPassword,
+    shareTtl:          shareTtl,
+    auditLog:          auditLogPath,
+    auditLogMaxSize:   auditLogMaxSize,
+    rateLimit:         rateLimit,
+    logLevel:          logLevel,
+    uploadTtl:         uploadTtl.HasValue ? FormatDuration(uploadTtl.Value) : null,
+    maxConcurrentZips: maxConcurrentZips,
+    maxZipBytes:       maxZipBytes);
 
 var sessionRegistry = new SessionRegistry();
 
@@ -615,7 +649,9 @@ var handlers = new RouteHandlers(
     auditLogPath:           auditLogPath,
     uploadTtl:              uploadTtl,
     adminExemptPath:        uploadExpirer?.AdminSubfolder,
-    sessionRegistry:        sessionRegistry);
+    sessionRegistry:        sessionRegistry,
+    maxConcurrentZips:      maxConcurrentZips,
+    maxZipBytes:            maxZipBytes);
 
 // ── Console request log (with elapsed time) ──────────────────────────────────
 // Must be registered before route mappings so it wraps endpoint execution.

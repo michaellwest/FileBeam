@@ -50,7 +50,9 @@ public class RouteHandlers
         string? auditLogPath = null,
         TimeSpan? uploadTtl = null,
         string? adminExemptPath = null,
-        SessionRegistry? sessionRegistry = null)
+        SessionRegistry? sessionRegistry = null,
+        int maxConcurrentZips = 2,
+        long maxZipBytes = 0)
     {
         var ctx = new HandlerContext(
             rootDir, uploadDir, watcher, isReadOnly, perSender,
@@ -58,7 +60,8 @@ public class RouteHandlers
             maxDirDepth, maxFilesPerDir, csrfToken, shareTtlSeconds,
             revocationStore, inviteStore, sessionKey, isTls, debugLog,
             configJson, cliCommand, auditLogPath, uploadTtl,
-            adminExemptPath, sessionRegistry);
+            adminExemptPath, sessionRegistry,
+            maxConcurrentZips, maxZipBytes);
 
         _browse   = new BrowseHandlers(ctx);
         _download = new DownloadHandlers(ctx);
