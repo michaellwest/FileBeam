@@ -8,6 +8,7 @@ A dead-simple LAN file server. Run it, share the URL, your colleague downloads (
 - ⬇️ Download files with **resume support** (HTTP range requests)
 - ⬆️ Upload files via drag-and-drop or file picker (up to 100 GB)
 - 🗑️ Delete and rename files directly from the browser
+- ☑️ **Bulk select** — select multiple files and download as ZIP or delete them all at once
 - 🔒 Admin account with Basic Auth — password auto-generated or configurable
 - 🚫 Read-only mode to disable uploads
 - 📥 Per-sender upload folders — each contributor's files land in their own subfolder
@@ -144,6 +145,37 @@ filebeam.exe --download ./share --tls-cert filebeam.crt --tls-key filebeam.key
 ```
 
 Clients connecting to a self-signed cert will see a browser warning; you can add the CA to your trust store to suppress it.
+
+#### Bulk select + download / delete
+
+File rows in the browser include a checkbox. Check one or more files and a **sticky toolbar** appears at the bottom of the page:
+
+- **⬇ Download as ZIP** — fetches all selected files in a single `selection.zip` archive. Available to all roles except `wo` (upload-only).
+- **🗑 Delete selected** — deletes all selected files server-side. Visible only to admin users.
+
+The toolbar's **Select all** checkbox in the table header checks/unchecks every file row on the current page.
+
+**Bulk endpoints** (`Content-Type: application/json`, `X-CSRF-Token` header required):
+
+| Method  | Endpoint                          | Root dir   | Auth    | Description                           |
+| ------- | --------------------------------- | ---------- | ------- | ------------------------------------- |
+| `POST`  | `/download-zip`                   | `serveDir` | not-wo  | Bulk download selected files as ZIP   |
+| `POST`  | `/admin/delete-bulk`              | `serveDir` | admin   | Bulk delete selected files            |
+| `POST`  | `/upload-area/download-zip`       | `uploadDir`| rw/admin| Bulk download from upload area as ZIP |
+| `POST`  | `/my-uploads/download-zip`        | sender dir | not-wo  | Bulk download from My Uploads as ZIP  |
+| `POST`  | `/admin/uploads/download-zip`     | `uploadDir`| admin   | Bulk download from admin uploads as ZIP |
+| `POST`  | `/admin/uploads/delete-bulk`      | `uploadDir`| admin   | Bulk delete from admin uploads        |
+
+**Request body** (all bulk endpoints):
+```json
+{ "paths": ["file.txt", "sub/report.pdf"] }
+```
+Paths are relative to the view root. Each is validated individually — a path traversal attempt returns `403` immediately.
+
+**Delete response** (`HTTP 200` always; inspect `deleted`/`failed` to detect partial failures):
+```json
+{ "deleted": 3, "failed": 1, "errors": ["file4.txt: File not found."] }
+```
 
 #### Admin account
 
