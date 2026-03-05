@@ -22,3 +22,6 @@ share/**/*
 *.cert
 *.cer
 *.crt
+*.pfx
+
+*.password
