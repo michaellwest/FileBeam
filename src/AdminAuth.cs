@@ -10,12 +10,22 @@ namespace FileBeam;
 internal static class AdminAuth
 {
     /// <summary>
-    /// Generates a cryptographically random 16-character alphanumeric password.
+    /// Generates a cryptographically random password in chunked format (e.g. <c>xxxx-xxxx-xxxx-xxxx-xxxx-xxxx</c>).
+    /// The 33-character alphabet is designed to minimise transcription errors, particularly for dyslexic users.
+    /// At the default length of 24 characters this produces approximately 121 bits of entropy.
     /// </summary>
-    internal static string GeneratePassword(int length = 16)
+    internal static string GeneratePassword(int length = 24)
     {
-        const string chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";    
-        return RandomNumberGenerator.GetString(chars, length);
+        // 33-char alphabet. The following characters are intentionally excluded:
+        //   Visual similarity  : 0 O o | 1 l I L i | 2 Z z | 5 S s | 6 9 | 8 B
+        //   Mirror pairs       : b/d  p/q
+        //   Rotation pairs     : n/u
+        const string chars = "acefghjkmrtvwxyACEFGHJKMRTVWXY347";
+        var raw = RandomNumberGenerator.GetString(chars, length);
+        var chunks = new List<string>();
+        for (int i = 0; i < raw.Length; i += 4)
+            chunks.Add(raw.Substring(i, Math.Min(4, raw.Length - i)));
+        return string.Join("-", chunks);
     }
 
     /// <summary>
