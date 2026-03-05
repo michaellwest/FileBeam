@@ -32,7 +32,9 @@ internal sealed class FileBeamConfig
     [JsonPropertyName("auditLogMaxSize")] public string? AuditLogMaxSize { get; init; }
     [JsonPropertyName("rateLimit")]       public int?    RateLimit       { get; init; }
     [JsonPropertyName("logLevel")]        public string? LogLevel        { get; init; }
-    [JsonPropertyName("uploadTtl")]       public string? UploadTtl       { get; init; }
+    [JsonPropertyName("uploadTtl")]        public string? UploadTtl        { get; init; }
+    [JsonPropertyName("maxConcurrentZips")] public int?   MaxConcurrentZips { get; init; }
+    [JsonPropertyName("maxZipSize")]        public string? MaxZipSize       { get; init; }
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -89,7 +91,9 @@ internal sealed class FileBeamConfig
         long    auditLogMaxSize,
         int     rateLimit,
         string  logLevel,
-        string? uploadTtl = null)
+        string? uploadTtl = null,
+        int     maxConcurrentZips = 2,
+        long    maxZipBytes = 0)
     {
         var sb = new StringBuilder("filebeam.exe");
         sb.Append($" --download \"{download}\"");
@@ -133,6 +137,10 @@ internal sealed class FileBeamConfig
             sb.Append($" --log-level {logLevel}");
         if (uploadTtl != null)
             sb.Append($" --upload-ttl \"{uploadTtl}\"");
+        if (maxConcurrentZips != 2)
+            sb.Append($" --max-concurrent-zips {maxConcurrentZips}");
+        if (maxZipBytes > 0)
+            sb.Append($" --max-zip-size {FormatBytes(maxZipBytes)}");
         return sb.ToString();
     }
 
@@ -161,7 +169,9 @@ internal sealed class FileBeamConfig
         long    auditLogMaxSize,
         int     rateLimit,
         string  logLevel,
-        string? uploadTtl = null)
+        string? uploadTtl = null,
+        int     maxConcurrentZips = 2,
+        long    maxZipBytes = 0)
     {
         var obj = new
         {
@@ -189,6 +199,8 @@ internal sealed class FileBeamConfig
             rateLimit,
             logLevel,
             uploadTtl,
+            maxConcurrentZips,
+            maxZipSize = maxZipBytes > 0 ? FormatBytes(maxZipBytes) : "unlimited",
         };
         return JsonSerializer.Serialize(obj, new JsonSerializerOptions { WriteIndented = true });
     }
