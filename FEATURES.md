@@ -232,3 +232,33 @@ Generate a QR code for the direct download URL of any file so users on phones ca
 - In the file listing, add a small QR icon button per file row; clicking opens a modal with the QR `<img>`
 - No auth required to *view* the QR image (it only encodes a URL); downloading the file itself still enforces normal auth
 - README: document `GET /qr/{**subpath}` endpoint
+
+### FB-17 · Admin auto-login QR at startup
+
+Embed a single-use, time-limited admin token into the startup QR code so the admin can scan it to log in without typing credentials. Opt-out via `--no-qr-autologin`.
+
+**Behaviour:**
+
+- Default on; `--no-qr-autologin` disables it and falls back to printing the bare server URL in the QR
+- At startup, generate a cryptographically random 32-byte token (`RandomNumberGenerator`)
+- QR encodes `http(s)://<host>:<port>/auto-login/{token}` instead of the bare URL
+- Print the expiry time alongside the QR in the terminal output, e.g. `⏱ Code expires at 09:32:15 (5 min)`
+- `GET /auto-login/{token}`: validates token (not expired, not already used), sets HMAC-signed `fb.session` cookie with `admin` role, burns the token immediately, redirects to `/`
+- Token is single-use: burned on first redemption regardless of remaining TTL
+- Token TTL: 5 minutes from server start
+- Expired or already-used token returns a plain HTML error page (no 401 challenge, no retry prompt)
+
+**Re-generating the QR:**
+
+- New admin endpoint `GET /admin/qr`: requires existing admin auth (Basic Auth or session cookie), generates a fresh token (invalidating any previous unused token), returns an HTML page containing the QR code as a `<img src="data:image/png;base64,…">` and the new expiry time
+- This lets the admin get a fresh scannable link on demand — e.g. to hand to themselves on a second device — without restarting the server
+- Link to `/admin/qr` added to the admin nav
+
+**Implementation:**
+
+- `AutoLoginToken` record: `{ string Token, DateTimeOffset ExpiresAt, bool Used }` stored in a single `volatile` field in `Program.cs` (only one token active at a time)
+- Token generation and replacement is atomic (replace the field reference; no dictionary needed)
+- `GET /auto-login/{token}` is exempt from the auth middleware (like `/s/{token}` and `/join/{token}`)
+- `GET /admin/qr` is admin-only; calls the same token-generation helper and renders a minimal HTML page with the QR PNG (use `QRCoder` to produce a `PngByteQRCode`, base64-encode it inline)
+- `--no-qr-autologin` flag; add `QrAutologin` bool to `FileBeamConfig` and `ToCliCommand` export
+- README: document `--no-qr-autologin`, the expiry notice, and `GET /admin/qr`
