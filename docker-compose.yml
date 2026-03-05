@@ -1,6 +1,10 @@
-# FileBeam — Docker Compose
+# FileBeam — Docker Compose (Linux containers)
 #
-# Usage:
+# Tip: use the wrapper scripts for automatic Linux/Windows container detection:
+#   .\compose.ps1 up -d         # Windows PowerShell host
+#   bash compose.sh up -d       # Linux / macOS / WSL host
+#
+# Or invoke docker compose directly (Linux containers only):
 #   docker compose up -d        # start in the background
 #   docker compose down         # stop and remove the container
 #   docker compose logs -f      # follow logs
