@@ -195,4 +195,64 @@ public sealed class AutoLoginStoreTests
         Assert.True(store.TryValidateSessionBearer(a));
         Assert.True(store.TryValidateSessionBearer(b));
     }
+
+    [Fact]
+    public void GenerateSessionBearer_StoresIp()
+    {
+        var store = new AutoLoginStore();
+        store.GenerateSessionBearer("10.0.0.1");
+        var bearers = store.GetActiveBearers();
+        Assert.Single(bearers);
+        Assert.Equal("10.0.0.1", bearers[0].Session.Ip);
+    }
+
+    [Fact]
+    public void RevokeBearer_RemovesMatchingToken()
+    {
+        var store = new AutoLoginStore();
+        var token = store.GenerateSessionBearer("1.2.3.4");
+        // GetActiveBearers returns 8-char prefix
+        var prefix = store.GetActiveBearers()[0].Prefix;
+
+        Assert.True(store.RevokeBearer(prefix));
+        Assert.False(store.TryValidateSessionBearer(token));
+    }
+
+    [Fact]
+    public void RevokeBearer_UnknownPrefix_ReturnsFalse()
+    {
+        var store = new AutoLoginStore();
+        Assert.False(store.RevokeBearer("doesntexist"));
+    }
+
+    [Fact]
+    public void GetActiveBearers_ReturnsEightCharPrefix()
+    {
+        var store = new AutoLoginStore();
+        store.GenerateSessionBearer("127.0.0.1");
+        var bearers = store.GetActiveBearers();
+        Assert.Single(bearers);
+        Assert.Equal(8, bearers[0].Prefix.Length);
+    }
+
+    [Fact]
+    public void GetActiveBearers_EmptyWhenNoneGenerated()
+    {
+        var store = new AutoLoginStore();
+        Assert.Empty(store.GetActiveBearers());
+    }
+
+    [Fact]
+    public void TryValidateSessionBearer_UpdatesLastSeen()
+    {
+        var store  = new AutoLoginStore();
+        var token  = store.GenerateSessionBearer("5.5.5.5");
+        var before = store.GetActiveBearers()[0].Session.LastSeen;
+
+        System.Threading.Thread.Sleep(10);
+        store.TryValidateSessionBearer(token, "5.5.5.5");
+
+        var after = store.GetActiveBearers()[0].Session.LastSeen;
+        Assert.True(after >= before);
+    }
 }

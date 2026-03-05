@@ -661,6 +661,14 @@ var cliCommand = FileBeamConfig.ToCliCommand(
 
 var sessionRegistry = new SessionRegistry();
 
+// Auth state — declared here so brute-force delegates can be passed to HandlerContext
+// before app.Use() middleware registration (closures capture by reference).
+var authState = new Dictionary<string, (int Failures, DateTimeOffset LockedUntil)>();
+var authLock  = new object();
+const int MaxFailures    = 10;
+const int LockoutSeconds = 60;
+const int MaxTrackedIPs  = 10_000;
+
 var handlers = new RouteHandlers(
     serveDir, uploadDir, fileWatcher,
     isReadOnly:             readOnly,
@@ -683,7 +691,34 @@ var handlers = new RouteHandlers(
     sessionRegistry:        sessionRegistry,
     maxConcurrentZips:      maxConcurrentZips,
     maxZipBytes:            maxZipBytes,
-    autoLoginStore:         autoLoginStore);
+    autoLoginStore:         autoLoginStore,
+    auditLogger:            auditLogger,
+    adminUsername:          adminUsername,
+    adminPassword:          adminPassword,
+    isLockedOut: ip =>
+    {
+        lock (authLock)
+            return authState.TryGetValue(ip, out var st) && st.LockedUntil > DateTimeOffset.UtcNow;
+    },
+    recordAuth: (ip, success) =>
+    {
+        lock (authLock)
+        {
+            if (success) { authState.Remove(ip); return; }
+            if (authState.Count >= MaxTrackedIPs)
+            {
+                var cutoff = DateTimeOffset.UtcNow.AddMinutes(-10);
+                foreach (var k in authState.Keys.Where(k => authState[k].LockedUntil < cutoff).ToList())
+                    authState.Remove(k);
+            }
+            authState.TryGetValue(ip, out var cur);
+            var failures  = cur.Failures + 1;
+            var lockUntil = failures >= MaxFailures
+                ? DateTimeOffset.UtcNow.AddSeconds(LockoutSeconds)
+                : cur.LockedUntil;
+            authState[ip] = (failures, lockUntil);
+        }
+    });
 
 // ── Console request log (with elapsed time) ──────────────────────────────────
 // Must be registered before route mappings so it wraps endpoint execution.
@@ -788,19 +823,14 @@ app.UseRateLimiter();
 // Per-IP failed-attempt tracking. Entries are trimmed when the dict grows large
 // to prevent unbounded memory growth from spoofed source IPs.
 {
-    var authState = new Dictionary<string, (int Failures, DateTimeOffset LockedUntil)>();
-    var authLock  = new object();
-    const int MaxFailures    = 10;
-    const int LockoutSeconds = 60;
-    const int MaxTrackedIPs  = 10_000;
-
     app.Use(async (ctx, next) =>
     {
-        // Share link redemption, invite join, and auto-login are always unauthenticated
-        if (ctx.Request.Method == "GET" &&
-            (ctx.Request.Path.StartsWithSegments("/s") ||
-             ctx.Request.Path.StartsWithSegments("/join") ||
-             ctx.Request.Path.StartsWithSegments("/auto-login")))
+        // Share link redemption, invite join, auto-login, and login page are always unauthenticated
+        if (ctx.Request.Path.StartsWithSegments("/login") ||
+            (ctx.Request.Method == "GET" &&
+             (ctx.Request.Path.StartsWithSegments("/s") ||
+              ctx.Request.Path.StartsWithSegments("/join") ||
+              ctx.Request.Path.StartsWithSegments("/auto-login"))))
         {
             await next();
             return;
@@ -900,7 +930,10 @@ app.UseRateLimiter();
             authenticated = true;
             // Issue a session bearer so JavaScript sub-requests (EventSource, fetch, XHR) can
             // authenticate via Authorization header or ?_bearer= without relying on cookies.
-            ctx.Items["fb.auto-bearer"] = autoLoginStore.GenerateSessionBearer();
+            var bearer = autoLoginStore.GenerateSessionBearer(ip);
+            ctx.Items["fb.auto-bearer"] = bearer;
+            auditLogger?.Log(DateTimeOffset.UtcNow.ToString("o"), "admin", ip,
+                "session-bearer-issue", ctx.Request.Path, 0, 200);
             debugLog?.Invoke("auth", "admin authenticated via _fbs continuation token");
         }
 
@@ -914,7 +947,7 @@ app.UseRateLimiter();
             if (authHdr.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
             {
                 var candidate = authHdr[7..].Trim();
-                if (autoLoginStore.TryValidateSessionBearer(candidate))
+                if (autoLoginStore.TryValidateSessionBearer(candidate, ip))
                     sessionBearer = candidate;
             }
             if (sessionBearer is null &&
@@ -922,7 +955,7 @@ app.UseRateLimiter();
                 bVals.Count > 0)
             {
                 var candidate = bVals[0]!;
-                if (autoLoginStore.TryValidateSessionBearer(candidate))
+                if (autoLoginStore.TryValidateSessionBearer(candidate, ip))
                     sessionBearer = candidate;
             }
             if (sessionBearer is not null)
@@ -959,6 +992,15 @@ app.UseRateLimiter();
                 ? DateTimeOffset.UtcNow.AddSeconds(LockoutSeconds)
                 : cur.LockedUntil;
             authState[ip] = (failures, lockUntil);
+        }
+
+        // Browser GET requests are redirected to the login page instead of getting a native popup
+        if (ctx.Request.Method == "GET" &&
+            ctx.Request.Headers.Accept.ToString().Contains("text/html", StringComparison.OrdinalIgnoreCase))
+        {
+            var next2 = Uri.EscapeDataString(ctx.Request.Path + ctx.Request.QueryString);
+            ctx.Response.Redirect($"/login?next={next2}");
+            return;
         }
 
         ctx.Response.Headers.WWWAuthenticate = "Basic realm=\"FileBeam\"";
@@ -1066,6 +1108,13 @@ app.MapGet("/join/{token}",                 handlers.JoinWithInvite);
 // ── Auto-login (unauthenticated — exempt in auth middleware) ──────────────────
 app.MapGet("/auto-login/{token}",           handlers.RedeemAutoLogin);
 app.MapGet("/admin/qr",                     handlers.GetAdminQr);
+
+// ── Login page (unauthenticated — exempt in auth middleware) ──────────────────
+app.MapGet("/login",                        handlers.GetLoginPage);
+app.MapPost("/login",                       (Delegate)handlers.PostLogin);
+
+// ── Admin: bearer session revocation ─────────────────────────────────────────
+app.MapPost("/admin/sessions/autologin/{prefix}/revoke", handlers.RevokeAutoLoginBearer);
 
 try   { await app.RunAsync(); }
 finally

@@ -655,4 +655,67 @@ public sealed class InvitesAdminPageTests
         Assert.Contains("refresh", html);
         Assert.Contains("30", html);
     }
+
+    [Fact]
+    public void RenderSessionsAdmin_NoBearers_ShowsEmptyBearerSection()
+    {
+        var html = HtmlRenderer.RenderSessionsAdmin(Array.Empty<SessionInfo>(), bearers: []);
+
+        Assert.Contains("No active QR/auto-login sessions", html);
+        Assert.Contains("Active QR / Auto-login Sessions", html);
+    }
+
+    [Fact]
+    public void RenderSessionsAdmin_WithBearers_ShowsBearerRows()
+    {
+        var issued = DateTimeOffset.UtcNow.AddHours(-1);
+        var session = new BearerSession(DateTimeOffset.UtcNow.AddHours(23), "192.168.1.5", issued);
+        var bearers = new List<(string Prefix, BearerSession Session)> { ("abcd1234", session) };
+
+        var html = HtmlRenderer.RenderSessionsAdmin(Array.Empty<SessionInfo>(), csrfToken: "csrf123", bearers: bearers);
+
+        Assert.Contains("192.168.1.5", html);
+        Assert.Contains("/admin/sessions/autologin/abcd1234/revoke", html);
+        Assert.Contains("csrf123", html);
+        Assert.Contains("Revoke", html);
+    }
+
+    // ── RenderLoginPage ───────────────────────────────────────────────────────
+
+    [Fact]
+    public void RenderLoginPage_NoError_RendersForm()
+    {
+        var html = HtmlRenderer.RenderLoginPage("csrfabc", error: null, next: null);
+
+        Assert.Contains("Sign In", html);
+        Assert.Contains("csrfabc", html);
+        Assert.Contains("action=\"/login\"", html);
+        Assert.DoesNotContain("class=\"err\"", html);
+    }
+
+    [Fact]
+    public void RenderLoginPage_WithError_ShowsErrorMessage()
+    {
+        var html = HtmlRenderer.RenderLoginPage("tok", error: "Invalid username or password.", next: null);
+
+        Assert.Contains("Invalid username or password.", html);
+    }
+
+    [Fact]
+    public void RenderLoginPage_WithNext_EmbedsNextField()
+    {
+        var html = HtmlRenderer.RenderLoginPage("tok", error: null, next: "/admin/sessions");
+
+        Assert.Contains("/admin/sessions", html);
+        Assert.Contains("name=\"next\"", html);
+    }
+
+    [Fact]
+    public void RenderLoginPage_EscapesXssInError()
+    {
+        var html = HtmlRenderer.RenderLoginPage("tok", error: "<script>alert(1)</script>", next: null);
+
+        Assert.DoesNotContain("<script>", html);
+        Assert.Contains("&lt;script&gt;", html);
+    }
 }

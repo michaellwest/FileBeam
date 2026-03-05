@@ -238,11 +238,13 @@ internal sealed class AdminHandlers(HandlerContext ctx)
             ? ctx.SessionRegistry.GetActive(ctx.InviteStore)
             : Array.Empty<SessionInfo>();
 
+        var bearers = ctx.AutoLoginStore?.GetActiveBearers() ?? Array.Empty<(string, BearerSession)>();
+
         bool separateDir = !ctx.RootDir.Equals(ctx.UploadDir, StringComparison.OrdinalIgnoreCase);
         var navLinks = HtmlRenderer.BuildNavLinks("admin", ctx.PerSender, separateDir, showHome: true,
             hasInvites: ctx.InviteStore is not null, hasAuditLog: ctx.HasAuditLog, hasSessions: true,
             hasQr: ctx.AutoLoginStore is not null);
-        return Results.Content(HtmlRenderer.RenderSessionsAdmin(sessions, navLinks, ctx.CsrfToken), "text/html");
+        return Results.Content(HtmlRenderer.RenderSessionsAdmin(sessions, navLinks, ctx.CsrfToken, bearers), "text/html");
     }
 
     // POST /admin/sessions/{id}/revoke  — revoke an invite and clear its sessions (admin only)
@@ -258,6 +260,19 @@ internal sealed class AdminHandlers(HandlerContext ctx)
             return Results.NotFound($"Invite '{id}' not found.");
 
         ctx.SessionRegistry?.RemoveByInvite(id);
+        return Results.Redirect("/admin/sessions");
+    }
+
+    // POST /admin/sessions/autologin/{prefix}/revoke  — revoke a QR session bearer (admin only)
+    internal IResult RevokeAutoLoginBearer(HttpContext httpCtx, string prefix)
+    {
+        if (HandlerContext.GetRole(httpCtx) != "admin")
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (ctx.AutoLoginStore is null)
+            return Results.StatusCode(StatusCodes.Status501NotImplemented);
+
+        ctx.AutoLoginStore.RevokeBearer(prefix);
         return Results.Redirect("/admin/sessions");
     }
 
@@ -455,12 +470,21 @@ internal sealed class AdminHandlers(HandlerContext ctx)
     internal IResult RedeemAutoLogin(HttpContext httpCtx, string token)
     {
         var store = ctx.AutoLoginStore;
+        var ip    = httpCtx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
         if (store is null || !store.TryRedeem(token))
+        {
+            ctx.AuditLogger?.Log(DateTimeOffset.UtcNow.ToString("o"), null, ip, "qr-redeem-fail", $"/auto-login/{token[..Math.Min(8, token.Length)]}…", 0, 401);
             return Results.Content(HtmlRenderer.RenderAutoLoginError(), "text/html");
+        }
 
         if (ctx.SessionKey is null)
+        {
+            ctx.AuditLogger?.Log(DateTimeOffset.UtcNow.ToString("o"), null, ip, "qr-redeem-fail", "/auto-login/…", 0, 500);
             return Results.Content(HtmlRenderer.RenderAutoLoginError(), "text/html");
+        }
 
+        ctx.AuditLogger?.Log(DateTimeOffset.UtcNow.ToString("o"), "admin", ip, "qr-redeem", "/auto-login/…", 0, 302);
         var contToken = store.GenerateContinuationToken();
         return Results.Redirect($"/?_fbs={contToken}");
     }
@@ -479,6 +503,10 @@ internal sealed class AdminHandlers(HandlerContext ctx)
         var token  = ctx.AutoLoginStore.Generate();
         var url    = $"{scheme}://{host}/auto-login/{token.Token}";
 
+        var ip = httpCtx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        var user = httpCtx.Items.TryGetValue("fb.user", out var u) && u is string s ? s : "admin";
+        ctx.AuditLogger?.Log(DateTimeOffset.UtcNow.ToString("o"), user, ip, "qr-generate", "/admin/qr", 0, 200);
+
         using var qrGen = new QRCodeGenerator();
         var qrData  = qrGen.CreateQrCode(url, QRCodeGenerator.ECCLevel.L);
         var pngQr   = new PngByteQRCode(qrData);
@@ -489,6 +517,81 @@ internal sealed class AdminHandlers(HandlerContext ctx)
             hasInvites: ctx.InviteStore is not null, hasAuditLog: ctx.HasAuditLog,
             hasSessions: ctx.HasSessions, hasQr: true);
         return Results.Content(HtmlRenderer.RenderAdminQr(base64, token.ExpiresAt, navLinks), "text/html");
+    }
+
+    // ── HTML Login page (unauthenticated) ──────────────────────────────────────
+
+    // GET /login  — render login form (exempt from auth middleware)
+    internal IResult GetLoginPage(HttpContext httpCtx)
+    {
+        var next = httpCtx.Request.Query.TryGetValue("next", out var n) ? n.ToString() : null;
+        return Results.Content(HtmlRenderer.RenderLoginPage(ctx.CsrfToken, error: null, next: next), "text/html");
+    }
+
+    // POST /login  — validate credentials and set admin session cookie (exempt from auth middleware)
+    internal async Task<IResult> PostLogin(HttpContext httpCtx)
+    {
+        var ip = httpCtx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+        // Brute-force lockout check
+        if (ctx.IsLockedOut?.Invoke(ip) == true)
+        {
+            await Task.Delay(200);
+            return Results.Content(HtmlRenderer.RenderLoginPage(ctx.CsrfToken,
+                error: "Too many failed attempts. Please wait and try again.", next: null), "text/html",
+                statusCode: StatusCodes.Status429TooManyRequests);
+        }
+
+        IFormCollection form;
+        try { form = await httpCtx.Request.ReadFormAsync(); }
+        catch { return Results.BadRequest("Invalid form body."); }
+
+        var username = form["username"].ToString().Trim();
+        var password = form["password"].ToString();
+        var next     = form["next"].ToString();
+
+        // Validate against admin credentials using constant-time comparison
+        var usernameMatch = CryptographicOperations.FixedTimeEquals(
+            System.Text.Encoding.UTF8.GetBytes(username),
+            System.Text.Encoding.UTF8.GetBytes(ctx.AdminUsername));
+        var passwordMatch = CryptographicOperations.FixedTimeEquals(
+            System.Text.Encoding.UTF8.GetBytes(password),
+            System.Text.Encoding.UTF8.GetBytes(ctx.AdminPassword));
+
+        if (!usernameMatch || !passwordMatch)
+        {
+            await Task.Delay(200);
+            ctx.RecordAuth?.Invoke(ip, false);
+            ctx.AuditLogger?.Log(DateTimeOffset.UtcNow.ToString("o"), username, ip, "admin-login-fail", "/login", 0, 401);
+            return Results.Content(
+                HtmlRenderer.RenderLoginPage(ctx.CsrfToken, error: "Invalid username or password.", next: next),
+                "text/html", statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        ctx.RecordAuth?.Invoke(ip, true);
+        ctx.AuditLogger?.Log(DateTimeOffset.UtcNow.ToString("o"), username, ip, "admin-login", "/login", 0, 302);
+
+        // Issue admin session cookie (same format as QR auto-login: no tokenId, role=admin)
+        if (ctx.SessionKey is not null)
+        {
+            static string B64Url(byte[] d) =>
+                Convert.ToBase64String(d).Replace('+', '-').Replace('/', '_').TrimEnd('=');
+            var pl = B64Url(System.Text.Encoding.UTF8.GetBytes(
+                System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    role     = "admin",
+                    issuedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                })));
+            var sig = HMACSHA256.HashData(ctx.SessionKey, System.Text.Encoding.UTF8.GetBytes(pl));
+            httpCtx.Response.Cookies.Append("fb.session", pl + "." + B64Url(sig),
+                new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Lax,
+                    Secure = ctx.IsTls, Path = "/" });
+        }
+
+        // Validate and sanitize the `next` redirect target (must start with / and not contain //)
+        var redirectTarget = !string.IsNullOrEmpty(next) && next.StartsWith('/') && !next.Contains("//")
+            ? next : "/";
+        return Results.Redirect(redirectTarget);
     }
 
     // ── SSE live reload ────────────────────────────────────────────────────────

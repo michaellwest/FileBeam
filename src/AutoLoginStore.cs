@@ -6,6 +6,17 @@ namespace FileBeam;
 
 public sealed record AutoLoginToken(string Token, DateTimeOffset ExpiresAt, bool Used);
 
+/// <summary>
+/// Metadata for a long-lived admin session bearer token issued after QR auto-login.
+/// </summary>
+public sealed class BearerSession(DateTimeOffset expiresAt, string ip, DateTimeOffset issuedAt)
+{
+    public DateTimeOffset ExpiresAt { get; } = expiresAt;
+    public string         Ip        { get; } = ip;
+    public DateTimeOffset IssuedAt  { get; } = issuedAt;
+    public DateTimeOffset LastSeen  { get; set; } = issuedAt;
+}
+
 /// <summary>Manages the single active admin auto-login token embedded in the startup QR code.</summary>
 public sealed class AutoLoginStore
 {
@@ -18,7 +29,7 @@ public sealed class AutoLoginStore
     // Long-lived, multi-use session bearer tokens issued after QR auto-login.
     // Used by JavaScript-initiated requests (fetch, XHR, EventSource) in environments
     // where cookies are not reliably persisted (e.g. mobile QR-scanner webviews).
-    private readonly ConcurrentDictionary<string, DateTimeOffset> _sessionBearers = new();
+    private readonly ConcurrentDictionary<string, BearerSession> _sessionBearers = new();
 
     /// <summary>Generates a fresh token (invalidates any previous unused token).</summary>
     public AutoLoginToken Generate()
@@ -91,23 +102,59 @@ public sealed class AutoLoginStore
     /// sub-requests (EventSource, fetch, XHR) when the session cookie cannot be persisted by the
     /// browser (e.g. mobile QR-scanner webviews).
     /// </summary>
-    public string GenerateSessionBearer(int ttlHours = 24)
+    /// <param name="ip">The remote IP of the requester (stored for dashboard display).</param>
+    /// <param name="ttlHours">Token lifetime in hours.</param>
+    public string GenerateSessionBearer(string? ip = null, int ttlHours = 24)
     {
         // Evict any expired entries to keep the dictionary small.
         var now = DateTimeOffset.UtcNow;
         foreach (var key in _sessionBearers.Keys.ToList())
-            if (_sessionBearers.TryGetValue(key, out var exp) && exp <= now)
+            if (_sessionBearers.TryGetValue(key, out var s) && s.ExpiresAt <= now)
                 _sessionBearers.TryRemove(key, out _);
 
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
-        _sessionBearers[token] = now.AddHours(ttlHours);
+        _sessionBearers[token] = new BearerSession(now.AddHours(ttlHours), ip ?? "unknown", now);
         return token;
     }
 
     /// <summary>
     /// Validates a session Bearer token. Returns <c>true</c> if valid and unexpired.
+    /// Updates <see cref="BearerSession.LastSeen"/> on success.
     /// Does <em>not</em> burn the token — the same token may be reused for multiple requests.
     /// </summary>
-    public bool TryValidateSessionBearer(string token) =>
-        _sessionBearers.TryGetValue(token, out var expiry) && expiry > DateTimeOffset.UtcNow;
+    /// <param name="token">The raw bearer token string.</param>
+    /// <param name="ip">The requester IP (updates LastSeen IP when provided).</param>
+    public bool TryValidateSessionBearer(string token, string? ip = null)
+    {
+        if (!_sessionBearers.TryGetValue(token, out var session)) return false;
+        if (session.ExpiresAt <= DateTimeOffset.UtcNow) return false;
+        session.LastSeen = DateTimeOffset.UtcNow;
+        return true;
+    }
+
+    /// <summary>
+    /// Revokes a session bearer whose key starts with <paramref name="tokenPrefix"/>.
+    /// Returns <c>true</c> if a matching token was found and removed.
+    /// </summary>
+    public bool RevokeBearer(string tokenPrefix)
+    {
+        foreach (var key in _sessionBearers.Keys)
+        {
+            if (key.StartsWith(tokenPrefix, StringComparison.OrdinalIgnoreCase))
+                return _sessionBearers.TryRemove(key, out _);
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Returns all active (non-expired) session bearers with their first-8-char prefix.
+    /// </summary>
+    public IReadOnlyList<(string Prefix, BearerSession Session)> GetActiveBearers()
+    {
+        var now = DateTimeOffset.UtcNow;
+        return _sessionBearers
+            .Where(kv => kv.Value.ExpiresAt > now)
+            .Select(kv => (kv.Key.Length >= 8 ? kv.Key[..8] : kv.Key, kv.Value))
+            .ToList();
+    }
 }
