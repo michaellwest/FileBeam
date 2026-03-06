@@ -183,7 +183,7 @@ public sealed class UploadExpirerTests : IDisposable
     }
 
     [Fact]
-    public void ScanAndDelete_LogsSkip_WhenAdminExemptFilePastTtl()
+    public void ScanAndDelete_NoLog_WhenAdminExemptFilePastTtl()
     {
         var logs = new List<string>();
         CreateOldFile("admin/old.txt", TimeSpan.FromHours(2));
@@ -191,9 +191,7 @@ public sealed class UploadExpirerTests : IDisposable
 
         expirer.ScanAndDelete();
 
-        Assert.Single(logs);
-        Assert.StartsWith("[SKIP]", logs[0]);
-        Assert.Contains("never expires", logs[0]);
+        Assert.Empty(logs);
     }
 
     [Fact]

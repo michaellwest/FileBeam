@@ -63,18 +63,6 @@ public sealed class UploadExpirer : IAsyncDisposable
                 if (_adminSubfolder is not null &&
                     path.StartsWith(_adminSubfolder, StringComparison.OrdinalIgnoreCase))
                 {
-                    if (_log is not null)
-                    {
-                        try
-                        {
-                            if (File.GetLastWriteTimeUtc(path) < cutoff)
-                            {
-                                var rel = Path.GetRelativePath(_uploadDir, path).Replace('\\', '/');
-                                _log($"[SKIP]  {rel} — never expires");
-                            }
-                        }
-                        catch { /* ignore stat errors */ }
-                    }
                     continue;
                 }
 
