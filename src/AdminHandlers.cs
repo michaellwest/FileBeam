@@ -456,7 +456,8 @@ internal sealed class AdminHandlers(HandlerContext ctx)
             httpCtx.Response.Cookies.Append("fb.session", cookieValue, cookieOpts);
         }
 
-        return Results.Content(JoinSuccessHtml(invite.FriendlyName, invite.Role), "text/html");
+        var serverUrl = $"{httpCtx.Request.Scheme}://{httpCtx.Request.Host}";
+        return Results.Content(JoinSuccessHtml(invite.FriendlyName, invite.Role, invite.Id, serverUrl), "text/html");
     }
 
     // ── Auto-login ─────────────────────────────────────────────────────────────
@@ -763,27 +764,48 @@ internal sealed class AdminHandlers(HandlerContext ctx)
         catch { return false; }
     }
 
-    private static string JoinSuccessHtml(string friendlyName, string role) =>
-        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">" +
-        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
-        "<title>Invite Accepted \u2014 FileBeam</title>" +
-        "<style>body{font-family:sans-serif;max-width:480px;margin:4rem auto;padding:0 1rem}" +
-        ".card{background:#f0f9f0;border:1px solid #6c6;border-radius:8px;padding:1.5rem}" +
-        "h2{margin-top:0}.role{font-weight:bold;color:#252}" +
-        ".note{margin-top:1.5rem;font-size:.85rem;color:#555;border-top:1px solid #ddd;padding-top:1rem}" +
-        ".btn{display:inline-block;margin-top:1.2rem;padding:.55rem 1.4rem;background:#22c55e;" +
-        "color:#fff;border-radius:6px;text-decoration:none;font-weight:bold}</style>" +
-        "</head><body>" +
-        "<h2>FileBeam</h2>" +
-        "<div class=\"card\">" +
-        "<h3>\u2713 Invite accepted</h3>" +
-        $"<p>Welcome, <span class=\"role\">{HttpUtility.HtmlEncode(friendlyName)}</span>! " +
-        $"You have been granted <span class=\"role\">{HttpUtility.HtmlEncode(role)}</span> access.</p>" +
-        "<a class=\"btn\" href=\"/\">Continue to FileBeam</a>" +
-        "</div>" +
-        "<div class=\"note\"><strong>CLI / curl users:</strong> Invite links use browser cookies. " +
-        "For command-line access use Basic Auth credentials if configured by the server admin.</div>" +
-        "</body></html>";
+    private static string JoinSuccessHtml(string friendlyName, string role, string inviteId, string serverUrl)
+    {
+        var encodedName   = HttpUtility.HtmlEncode(friendlyName);
+        var encodedRole   = HttpUtility.HtmlEncode(role);
+        var encodedId     = HttpUtility.HtmlEncode(inviteId);
+        var encodedServer = HttpUtility.HtmlEncode(serverUrl);
+        return
+            "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">" +
+            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+            "<title>Invite Accepted \u2014 FileBeam</title>" +
+            "<style>body{font-family:sans-serif;max-width:520px;margin:4rem auto;padding:0 1rem}" +
+            ".card{background:#f0f9f0;border:1px solid #6c6;border-radius:8px;padding:1.5rem}" +
+            "h2{margin-top:0}.role{font-weight:bold;color:#252}" +
+            ".api-box{margin-top:1.2rem;background:#f5f5f5;border:1px solid #ddd;border-radius:6px;padding:.9rem 1rem}" +
+            ".api-box h4{margin:0 0 .5rem;font-size:.9rem;color:#333}" +
+            ".key-row{display:flex;align-items:center;gap:.5rem;margin-bottom:.6rem}" +
+            ".key-row code{flex:1;background:#fff;border:1px solid #ccc;border-radius:4px;padding:.3rem .5rem;font-size:.82rem;overflow:auto;white-space:nowrap}" +
+            ".copy-btn{padding:.25rem .6rem;font-size:.8rem;cursor:pointer;border:1px solid #aaa;border-radius:4px;background:#fff}" +
+            ".copy-btn:active{background:#e0ffe0}" +
+            "pre{margin:.4rem 0 0;background:#fff;border:1px solid #ccc;border-radius:4px;padding:.5rem;font-size:.78rem;overflow:auto;white-space:pre}" +
+            ".note{margin-top:1.5rem;font-size:.85rem;color:#555;border-top:1px solid #ddd;padding-top:1rem}" +
+            ".btn{display:inline-block;margin-top:1.2rem;padding:.55rem 1.4rem;background:#22c55e;" +
+            "color:#fff;border-radius:6px;text-decoration:none;font-weight:bold}</style>" +
+            "</head><body>" +
+            "<h2>FileBeam</h2>" +
+            "<div class=\"card\">" +
+            "<h3>\u2713 Invite accepted</h3>" +
+            $"<p>Welcome, <span class=\"role\">{encodedName}</span>! " +
+            $"You have been granted <span class=\"role\">{encodedRole}</span> access.</p>" +
+            "<a class=\"btn\" href=\"/\">Continue to FileBeam</a>" +
+            "<div class=\"api-box\">" +
+            "<h4>API Key (for curl / CLI)</h4>" +
+            "<div class=\"key-row\">" +
+            $"<code id=\"api-key-val\">{encodedId}</code>" +
+            "<button class=\"copy-btn\" onclick=\"navigator.clipboard.writeText(document.getElementById('api-key-val').textContent).then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)})\">Copy</button>" +
+            "</div>" +
+            $"<pre>curl -H \"X-API-Key: {encodedId}\" {encodedServer}/download/</pre>" +
+            "<p style=\"font-size:.78rem;color:#666;margin:.5rem 0 0\">Use <code>X-API-Key: &lt;key&gt;</code> to authenticate curl and CLI requests without a browser session. No CSRF token required.</p>" +
+            "</div>" +
+            "</div>" +
+            "</body></html>";
+    }
 
     private static string JoinErrorHtml(string message) =>
         "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">" +

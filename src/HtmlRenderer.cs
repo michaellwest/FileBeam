@@ -831,7 +831,7 @@ nav a{font-size:.82rem;color:#aaa;white-space:nowrap}
           <input id="link-url" class="form-inp" readonly>
           <button class="btn btn-sm" id="copy-btn" onclick="copyGeneratedLink()">Copy</button>
         </div>
-        <div style="font-size:.82rem;color:#888;margin:.5rem 0 .35rem">CLI / API Bearer token:</div>
+        <div style="font-size:.82rem;color:#888;margin:.5rem 0 .35rem">API Key (for curl / CLI):</div>
         <div class="link-row">
           <input id="link-bearer" class="form-inp" readonly>
           <button class="btn btn-sm" id="copy-bearer-btn" onclick="copyGeneratedBearer()">Copy</button>
@@ -1023,7 +1023,7 @@ initExpiryCountdowns();
                 ? $"<button class=\"act-btn\" id=\"cp-{idAttr}\" title=\"Copy invite link\" onclick=\"copyInviteLink('{idAttr}','{linkJs}')\">🔗</button>"
                 : "";
             var bearerBtn  = active
-                ? $"<button class=\"act-btn\" id=\"cb-{idAttr}\" title=\"Copy Bearer token\" onclick=\"copyBearerToken('{idAttr}')\">⌨</button>"
+                ? $"<button class=\"act-btn\" id=\"cb-{idAttr}\" title=\"Copy API Key\" onclick=\"copyBearerToken('{idAttr}')\">⌨</button>"
                 : "";
             var revokeBtn  = t.IsActive
                 ? $"<button class=\"act-btn\" title=\"Revoke invite\" onclick=\"revokeInvite('{idAttr}')\">🚫</button>"

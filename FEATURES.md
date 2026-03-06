@@ -24,6 +24,12 @@ Each invite tracks browser joins and Bearer API calls independently, with option
 
 Show a per-file upload progress bar in the browser UI with percentage and estimated speed. Uses `XMLHttpRequest` (already used for CSRF) instead of a plain form `POST` so that `progress` events are available. No backend changes required.
 
+### FB-18 · Scoped API Key (X-API-Key) ✅
+
+`X-API-Key: <invite-id>` header accepted as an alias for `Authorization: Bearer <invite-id>`.
+CSRF validation is skipped when the request is authenticated via `X-API-Key`, `Authorization: Bearer`, or Basic Auth (these methods cannot be triggered cross-site).
+The invite join success page surfaces the invite ID as an API key with a one-click copy button and a ready-to-run `curl` example.
+
 ### FB-03 · Clipboard paste upload
 
 Paste an image (or any file) from the clipboard directly onto the page to upload it. Listens for the `paste` event on `document`, extracts `DataTransfer` items, and submits them through the same upload path as drag-and-drop. Works on all modern browsers.
