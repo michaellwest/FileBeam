@@ -210,21 +210,31 @@ filebeam.exe --download ./share --invites-file ./invites.json
 
 **Browser access:** the recipient visits `http://host/join/{id}`. FileBeam sets a signed `fb.session` cookie (HMAC-SHA256, HttpOnly, SameSite=Lax) and redirects to the file browser — no password prompt needed.
 
-**CLI / API access:** use the token ID as an HTTP Bearer token:
+**CLI / API access:** use the invite ID with either of these two headers:
 
 ```bash
-# Download a file using a Bearer token
+# X-API-Key header (recommended for curl / CLI)
+curl -H "X-API-Key: <invite-id>" http://host/download/report.pdf -o report.pdf
+
+# Authorization: Bearer header (same invite ID, alternative syntax)
 curl -H "Authorization: Bearer <invite-id>" http://host/download/report.pdf -o report.pdf
+
+# Upload without a CSRF token — CSRF is skipped for X-API-Key / Bearer / Basic Auth
+curl -H "X-API-Key: <invite-id>" -F "files=@photo.jpg" http://host/upload/
 
 # PowerShell
 Invoke-WebRequest http://host/download/report.pdf `
-  -Headers @{ Authorization = "Bearer <invite-id>" } `
+  -Headers @{ "X-API-Key" = "<invite-id>" } `
   -OutFile report.pdf
 ```
 
-> ⚠ **Security note:** sharing the browser join link also exposes the Bearer token ID — both grant the same access. Use TLS (`--tls-cert` / `--tls-key`) when transmitting Bearer tokens over untrusted networks. Revoking an invite immediately invalidates both the cookie sessions and Bearer token.
+The invite ID is shown on the join success page after the recipient opens the invite link in a browser — click **Copy** next to the API Key box. It is also available in the admin invite table via the ⌨ button.
 
-**UseCount tracking:** Bearer token usage does **not** increment the invite's `useCount` — that counter only reflects browser `/join` events.
+**CSRF exemption:** requests authenticated with `X-API-Key`, `Authorization: Bearer`, or Basic Auth skip CSRF validation entirely. State-changing requests (upload, delete, rename, mkdir) work from `curl` without a separate CSRF-token fetch step. Browser sessions (session cookies) still require the CSRF token.
+
+> ⚠ **Security note:** sharing the browser join link also exposes the API Key ID — both grant the same access. Use TLS (`--tls-cert` / `--tls-key`) when transmitting keys over untrusted networks. Revoking an invite immediately invalidates both the cookie sessions and API Key.
+
+**UseCount tracking:** API Key / Bearer token usage does **not** increment the invite's `useCount` — that counter only reflects browser `/join` events.
 
 **Invite management** is done via `GET /admin/invites` (HTML admin page, admin role required) or the REST API:
 
@@ -237,7 +247,7 @@ Invoke-WebRequest http://host/download/report.pdf `
 | `PATCH`  | `/admin/invites/{id}`      | Edit name / role / expiry                                    |
 | `GET`    | `/join/{token}`            | Redeem invite, set signed session cookie, show welcome page  |
 
-The admin UI page shows active invites in a table with one-click copy buttons for the join link (🔗) and Bearer token (⌨), plus a revoke button. The **New Invite** modal shows both the browser join URL and the `Bearer <id>` string after creation. Inactive / expired invites appear in a collapsed section. An **Invites** nav link is added to all pages when `--invites-file` is configured.
+The admin UI page shows active invites in a table with one-click copy buttons for the join link (🔗) and API Key (⌨), plus a revoke button. The **New Invite** modal shows both the browser join URL and the API Key (invite ID) after creation. Inactive / expired invites appear in a collapsed section. An **Invites** nav link is added to all pages when `--invites-file` is configured.
 
 The **Expires** column shows a live relative countdown that updates every 10 seconds (e.g. `expires in 2h 30m`, `expires in 45s`). Expired invites that haven't been cleaned up display `expired Xm ago` in red. Hover the cell for the absolute UTC timestamp.
 

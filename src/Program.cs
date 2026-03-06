@@ -866,8 +866,9 @@ app.UseRateLimiter();
         // 1. Basic Auth — admin username + password → role "admin"
         if (AdminAuth.TryAdminBasicAuth(header, adminUsername, adminPassword, out var basicUser))
         {
-            ctx.Items["fb.role"] = "admin";
-            ctx.Items["fb.user"] = basicUser;
+            ctx.Items["fb.role"]     = "admin";
+            ctx.Items["fb.user"]     = basicUser;
+            ctx.Items["fb.auth-via"] = "basic";
             authenticated = true;
         }
 
@@ -875,14 +876,31 @@ app.UseRateLimiter();
         if (!authenticated &&
             AdminAuth.TryBearerAuth(header, inviteStore, out var bearerRole, out var bearerUser))
         {
-            ctx.Items["fb.role"] = bearerRole;
-            ctx.Items["fb.user"] = bearerUser;
+            ctx.Items["fb.role"]     = bearerRole;
+            ctx.Items["fb.user"]     = bearerUser;
+            ctx.Items["fb.auth-via"] = "bearer";
             authenticated = true;
 
             // Track session for active sessions dashboard
             var bearerTokenId = header[7..].Trim();
             if (inviteStore.TryGet(bearerTokenId, out var bearerInvite))
                 sessionRegistry.Touch(bearerTokenId, bearerInvite!.FriendlyName, bearerRole!, ip, "bearer");
+        }
+
+        // 2a. X-API-Key — alias for Authorization: Bearer <invite-id>
+        // Allows curl/CLI consumers to use the more conventional X-API-Key header.
+        var apiKey = ctx.Request.Headers["X-API-Key"].FirstOrDefault();
+        if (!authenticated && apiKey is { Length: > 0 })
+        {
+            var inv = inviteStore.TryBearerAuthenticate(apiKey);
+            if (inv is not null)
+            {
+                ctx.Items["fb.role"]     = inv.Role;
+                ctx.Items["fb.user"]     = $"invite:{inv.FriendlyName}";
+                ctx.Items["fb.auth-via"] = "apikey";
+                authenticated = true;
+                sessionRegistry.Touch(apiKey, inv.FriendlyName, inv.Role!, ip, "bearer");
+            }
         }
 
         // 3. Session cookie — invite-based browser auth
@@ -893,8 +911,9 @@ app.UseRateLimiter();
             debugLog?.Invoke("auth", $"session cookie present ({sessionCookie.Length} chars), valid={cookieValid}, role={cookieRole}");
             if (cookieValid)
             {
-                ctx.Items["fb.role"] = cookieRole;
-                ctx.Items["fb.user"] = cookieUser;
+                ctx.Items["fb.role"]     = cookieRole;
+                ctx.Items["fb.user"]     = cookieUser;
+                ctx.Items["fb.auth-via"] = "cookie";
                 authenticated = true;
 
                 // Track session for active sessions dashboard
@@ -1018,6 +1037,15 @@ app.Use(async (ctx, next) =>
     var method = ctx.Request.Method;
     if (method is "POST" or "DELETE" or "PATCH" or "PUT")
     {
+        // Requests authenticated via Bearer, X-API-Key, or Basic Auth cannot carry
+        // cross-site cookies, so CSRF protection is not required for them.
+        var authVia = ctx.Items["fb.auth-via"] as string;
+        if (authVia is "basic" or "bearer" or "apikey")
+        {
+            await next();
+            return;
+        }
+
         // 1. Accept token from request header (JSON API and non-POST verbs)
         bool valid = ctx.Request.Headers.TryGetValue("X-CSRF-Token", out var headerToken)
                      && headerToken == csrfToken;
