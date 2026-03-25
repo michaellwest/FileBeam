@@ -130,6 +130,14 @@ internal sealed class UploadHandlers(HandlerContext ctx)
                 if (File.Exists(partDest)) File.Delete(partDest);
                 throw;
             }
+            catch (Microsoft.AspNetCore.Http.BadHttpRequestException)
+            {
+                // Client disconnected mid-upload (network drop, timeout, browser closed).
+                // Clean up the incomplete .part file and re-throw so the logging middleware
+                // can report it as a warning rather than an unhandled 500 error.
+                if (File.Exists(partDest)) File.Delete(partDest);
+                throw;
+            }
 
             // Promote the temporary file to its final name.
             File.Move(partDest, dest);

@@ -744,8 +744,17 @@ app.Use(async (ctx, next) =>
     }
 
     Exception? unhandled = null;
+    bool clientDisconnect = false;
     try { await next(); }
     catch (OperationCanceledException) { throw; }
+    catch (Microsoft.AspNetCore.Http.BadHttpRequestException ex)
+    {
+        // Client disconnected mid-request (network drop, timeout, browser closed).
+        // Flag for the logging block so it shows as a warning, not a 500 error.
+        clientDisconnect = true;
+        unhandled = ex;
+        throw;
+    }
     catch (Exception ex) { unhandled = ex; throw; }
     finally
     {
@@ -757,8 +766,9 @@ app.Use(async (ctx, next) =>
             var ip     = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
             var method = ctx.Request.Method;
             var path   = ctx.Request.Path.Value ?? "/";
-            var status = unhandled is not null ? 500 : ctx.Response.StatusCode;
+            var status = clientDisconnect ? 499 : unhandled is not null ? 500 : ctx.Response.StatusCode;
             var color  = status >= 400 ? "red" : status >= 300 ? "yellow" : "green";
+            var level  = clientDisconnect ? "[yellow][[WARN]][/]" : "[grey][[INFO]][/]";
             var time   = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
 
             // Build optional transfer info suffix (file name + size for uploads/downloads)
@@ -774,12 +784,14 @@ app.Use(async (ctx, next) =>
                     transfer = $"  [grey]{size}[/]";
             }
 
-            var exInfo = unhandled is not null
-                ? $"  [red]{Markup.Escape(unhandled.GetType().Name)}: {Markup.Escape(unhandled.Message)}[/]"
-                : "";
+            var exInfo = clientDisconnect
+                ? "  [yellow]upload interrupted — client disconnected[/]"
+                : unhandled is not null
+                    ? $"  [red]{Markup.Escape(unhandled.GetType().Name)}: {Markup.Escape(unhandled.Message)}[/]"
+                    : "";
 
             AnsiConsole.MarkupLine(
-                $"[grey]{time}[/]  [grey][[INFO]][/]  [grey][[{requestId}]][/]  [{color}]{status}[/]  [bold]{method}[/]  {Markup.Escape(path)}{transfer}{exInfo}  [grey]{ip}  {sw.ElapsedMilliseconds}ms[/]");
+                $"[grey]{time}[/]  {level}  [grey][[{requestId}]][/]  [{color}]{status}[/]  [bold]{method}[/]  {Markup.Escape(path)}{transfer}{exInfo}  [grey]{ip}  {sw.ElapsedMilliseconds}ms[/]");
 
             // ── Audit log entry for file transfer actions ──────────────────────
             if (auditLogger is not null && unhandled is null)

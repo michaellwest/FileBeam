@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -1028,5 +1029,95 @@ public sealed class RouteHandlersTests : IDisposable
         Assert.Empty(registry.GetActive(store));
         // Response redirects to /admin/sessions
         Assert.Equal(302, await ExecuteAsync(result));
+    }
+
+    // ── Upload interrupted (BadHttpRequestException) ─────────────────────────
+
+    [Fact]
+    public async Task UploadFiles_BadHttpRequestException_CleansUpPartFile()
+    {
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher);
+
+        var ctx = MakeContext();
+        ctx.Items["fb.role"] = "rw";
+        ctx.Items["fb.user"] = "testuser";
+
+        // Set up a form with a file that throws BadHttpRequestException during CopyToAsync
+        var faultingFile = new FaultingFormFile("test.txt");
+        var formFiles    = new FormFileCollection { faultingFile };
+        var form         = new FormCollection(new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>(), formFiles);
+        ctx.Request.ContentType = "multipart/form-data";
+        ctx.Features.Set<IFormFeature>(new DefaultFormFeature(form));
+
+        await Assert.ThrowsAsync<BadHttpRequestException>(() => handlers.UploadFiles(ctx, null));
+
+        // The .part file must have been cleaned up
+        var partFiles = Directory.GetFiles(_uploadDir, "*.part");
+        Assert.Empty(partFiles);
+
+        // No final file should exist either
+        var allFiles = Directory.GetFiles(_uploadDir);
+        Assert.Empty(allFiles);
+    }
+
+    [Fact]
+    public async Task UploadFiles_BadHttpRequestException_KeepsCompletedFiles()
+    {
+        var handlers = new RouteHandlers(_rootDir, _uploadDir, _watcher);
+
+        var ctx = MakeContext();
+        ctx.Items["fb.role"] = "rw";
+        ctx.Items["fb.user"] = "testuser";
+
+        // First file succeeds, second file faults
+        var goodFile    = new FormFile(new MemoryStream("hello"u8.ToArray()), 0, 5, "file", "good.txt");
+        var faultingFile = new FaultingFormFile("bad.txt");
+        var formFiles    = new FormFileCollection { goodFile, faultingFile };
+        var form         = new FormCollection(new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>(), formFiles);
+        ctx.Request.ContentType = "multipart/form-data";
+        ctx.Features.Set<IFormFeature>(new DefaultFormFeature(form));
+
+        await Assert.ThrowsAsync<BadHttpRequestException>(() => handlers.UploadFiles(ctx, null));
+
+        // The good file should have been kept (already promoted from .part)
+        Assert.True(File.Exists(Path.Combine(_uploadDir, "good.txt")));
+
+        // No .part files should remain
+        var partFiles = Directory.GetFiles(_uploadDir, "*.part");
+        Assert.Empty(partFiles);
+    }
+
+    /// <summary>
+    /// A fake IFormFile whose CopyToAsync throws BadHttpRequestException
+    /// to simulate a client disconnecting mid-upload.
+    /// </summary>
+    private sealed class FaultingFormFile(string fileName) : IFormFile
+    {
+        public string ContentDisposition => $"form-data; name=\"file\"; filename=\"{fileName}\"";
+        public string ContentType        => "application/octet-stream";
+        public string FileName           => fileName;
+        public IHeaderDictionary Headers  => new HeaderDictionary();
+        public long Length               => 1024;
+        public string Name              => "file";
+
+        public Stream OpenReadStream() => new MemoryStream(new byte[1024]);
+
+        public void CopyTo(Stream target)
+            => throw new BadHttpRequestException("Unexpected end of request content.");
+
+        public Task CopyToAsync(Stream target, CancellationToken cancellationToken = default)
+            => throw new BadHttpRequestException("Unexpected end of request content.");
+    }
+
+    /// <summary>
+    /// A pre-parsed form feature that returns the form directly without reading the request body.
+    /// </summary>
+    private sealed class DefaultFormFeature(IFormCollection form) : IFormFeature
+    {
+        public bool HasFormContentType => true;
+        public IFormCollection? Form { get => form; set { } }
+        public IFormCollection ReadForm() => form;
+        public Task<IFormCollection> ReadFormAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(form);
     }
 }
