@@ -25,3 +25,7 @@ share/**/*
 *.pfx
 
 *.password
+
+# Local test scripts and generated test data
+test-*.ps1
+test-*.bin
