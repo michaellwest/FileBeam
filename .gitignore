@@ -29,3 +29,6 @@ share/**/*
 # Local test scripts and generated test data
 test-*.ps1
 test-*.bin
+
+# Release build output
+release/
