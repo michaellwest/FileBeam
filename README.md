@@ -7,6 +7,7 @@ A dead-simple LAN file server. Run it, share the URL, your colleague downloads (
 - 📁 Browse directories and subdirectories
 - ⬇️ Download files with **resume support** (HTTP range requests)
 - ⬆️ Upload files via drag-and-drop or file picker (up to 100 GB)
+- 🔁 **Resumable uploads** — large files (≥ 50 MB) are uploaded in chunks; interrupted transfers resume automatically
 - 🗑️ Delete and rename files directly from the browser
 - ☑️ **Bulk select** — select multiple files and download as ZIP or delete them all at once
 - 🔒 Admin account with Basic Auth — password auto-generated or configurable
@@ -351,6 +352,52 @@ While logged in, admins can regenerate a fresh QR at any time:
 | ------ | --------------------- | ----------------------------------------------------------------- |
 | `GET`  | `/auto-login/{token}` | Redeem a startup auto-login token (unauthenticated)               |
 | `GET`  | `/admin/qr`           | Generate a new auto-login QR and display it as HTML (admin only)  |
+
+#### Resumable chunked uploads
+
+Files **≥ 50 MB** are automatically uploaded in 50 MB chunks with resume support. If a transfer is interrupted (network drop, browser closed, server restart), the partial `.part` file is kept on disk and the upload can be resumed from where it left off.
+
+**Browser:** the client-side JavaScript detects large files and sends them as sequential chunks using `Content-Range` headers. Progress is saved to `localStorage`; on page reload, interrupted uploads appear in the upload queue with a **Resume** button (you must re-select the file due to browser security).
+
+**curl / CLI:** send the file with `Content-Type: application/octet-stream` and the `X-Upload-Filename` header. For resumable uploads, check progress with HEAD and resume with `Content-Range`:
+
+```bash
+# Simple stream upload (no chunking needed for reliable connections)
+curl -X POST http://host/upload/ \
+  -H "X-API-Key: <invite-id>" \
+  -H "Content-Type: application/octet-stream" \
+  -H "X-Upload-Filename: big-file.iso" \
+  --data-binary @big-file.iso
+
+# Check how many bytes the server has received
+curl -I "http://host/upload/?file=big-file.iso" \
+  -H "X-API-Key: <invite-id>"
+# → X-Bytes-Received: 2621440000
+
+# Resume from where it left off
+curl -X POST http://host/upload/ \
+  -H "X-API-Key: <invite-id>" \
+  -H "Content-Type: application/octet-stream" \
+  -H "X-Upload-Filename: big-file.iso" \
+  -H "Content-Range: bytes 2621440000-5368709119/5368709120" \
+  --data-binary @big-file.iso --range 2621440000-
+```
+
+```powershell
+# PowerShell — simple stream upload
+Invoke-RestMethod "http://host/upload/" -Method POST `
+  -Headers @{ "X-API-Key" = "<invite-id>"; "Content-Type" = "application/octet-stream"; "X-Upload-Filename" = "big-file.iso" } `
+  -InFile "C:\big-file.iso"
+
+# Check progress after a failure
+$resp = Invoke-WebRequest "http://host/upload/?file=big-file.iso" `
+  -Method HEAD -Headers @{ "X-API-Key" = "<invite-id>" }
+$received = $resp.Headers["X-Bytes-Received"]
+```
+
+**Stale cleanup:** incomplete `.part` files are cleaned up by the existing `--upload-ttl` expiry mechanism (if configured). Without `--upload-ttl`, `.part` files remain until manually deleted or the upload is resumed.
+
+**Multipart form uploads** (the default `<form>` POST) continue to work unchanged for all file sizes. The chunked stream path only activates when `Content-Type: application/octet-stream` is used.
 
 #### Upload expiry auto-delete
 

@@ -64,11 +64,24 @@ function escHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// ── Chunked upload threshold (50 MB) ─────────────────────────────────────────
+const CHUNK_SIZE      = 50 * 1024 * 1024;  // 50 MB per chunk
+const CHUNK_THRESHOLD = CHUNK_SIZE;         // files >= this size use chunked upload
+
 function startUploads(files) {
   [...files].forEach(uploadFile);
 }
 
 function uploadFile(file) {
+  if (file.size >= CHUNK_THRESHOLD) {
+    uploadFileChunked(file);
+  } else {
+    uploadFileSimple(file);
+  }
+}
+
+// ── Simple upload (small files, existing XHR + FormData path) ────────────────
+function uploadFileSimple(file) {
   activeUploads++;
 
   const row = document.createElement('div');
@@ -142,6 +155,196 @@ function uploadFile(file) {
   if (autoBearerToken) xhr.setRequestHeader('Authorization', 'Bearer ' + autoBearerToken);
   xhr.send(fd);
 }
+
+// ── Chunked upload (large files, fetch + Blob.slice + Content-Range) ─────────
+function uploadFileChunked(file) {
+  activeUploads++;
+
+  const row = document.createElement('div');
+  row.className = 'q-row';
+  row.innerHTML =
+    `<span class="q-name" title="${escHtml(file.name)}">${escHtml(file.name)}</span>` +
+    `<span class="q-size">${fmtSize(file.size)}</span>` +
+    `<div class="q-bar-wrap"><div class="q-bar"></div></div>` +
+    `<span class="q-status">uploading…</span>` +
+    `<button class="q-btn" title="Cancel">✕</button>`;
+  queue.hidden = false;
+  queue.appendChild(row);
+
+  const bar    = row.querySelector('.q-bar');
+  const status = row.querySelector('.q-status');
+  const btn    = row.querySelector('.q-btn');
+
+  const controller = new AbortController();
+  btn.addEventListener('click', () => {
+    controller.abort();
+    activeUploads--;
+    status.textContent = 'cancelled';
+    status.className   = 'q-status q-dim';
+    btn.remove();
+    removeChunkedProgress(file.name);
+    checkDone();
+  });
+
+  const startTime = Date.now();
+
+  (async function sendChunks() {
+    try {
+      // Check for a previous partial upload to resume from
+      let offset = loadChunkedProgress(file.name);
+      if (offset > 0) {
+        // Verify with server that the .part file still exists at that offset
+        const headRes = await fetch(form.action + '?file=' + encodeURIComponent(file.name), {
+          method: 'HEAD',
+          headers: { ...authHeaders(), 'X-CSRF-Token': csrfToken },
+          signal: controller.signal
+        });
+        if (headRes.ok) {
+          const serverBytes = parseInt(headRes.headers.get('X-Bytes-Received') || '0', 10);
+          offset = serverBytes; // trust the server's count
+        } else {
+          offset = 0; // .part file gone — start over
+        }
+      }
+
+      while (offset < file.size) {
+        const end   = Math.min(offset + CHUNK_SIZE, file.size);
+        const chunk = file.slice(offset, end);
+        const rangeHeader = `bytes ${offset}-${end - 1}/${file.size}`;
+
+        const res = await fetch(form.action, {
+          method: 'POST',
+          headers: {
+            ...authHeaders(),
+            'Content-Type': 'application/octet-stream',
+            'Content-Range': rangeHeader,
+            'X-Upload-Filename': file.name,
+            'X-CSRF-Token': csrfToken
+          },
+          body: chunk,
+          signal: controller.signal
+        });
+
+        if (!res.ok) {
+          // Save progress for resume and mark as failed
+          saveChunkedProgress(file.name, offset);
+          activeUploads--;
+          markFailed(row, bar, status, btn, file, res.status);
+          return;
+        }
+
+        offset = end;
+        saveChunkedProgress(file.name, offset);
+
+        // Update progress bar
+        const pct = offset / file.size;
+        bar.style.width = Math.round(pct * 100) + '%';
+        const elapsed = (Date.now() - startTime) / 1000;
+        if (elapsed > 0.5 && pct > 0) {
+          const speed     = offset / elapsed;
+          const remaining = (file.size - offset) / speed;
+          const speedStr  = fmtSize(speed) + '/s';
+          const etaStr    = remaining > 1
+            ? (remaining < 60 ? Math.round(remaining) + 's' : Math.round(remaining / 60) + 'm')
+            : '';
+          status.textContent = speedStr + (etaStr ? '  ' + etaStr : '');
+        }
+      }
+
+      // Upload complete
+      activeUploads--;
+      bar.style.width      = '100%';
+      bar.style.background = '#4caf50';
+      status.textContent   = '✓';
+      status.className     = 'q-status q-ok';
+      btn.remove();
+      removeChunkedProgress(file.name);
+      anySucceeded = true;
+      checkDone();
+    } catch (err) {
+      if (err.name === 'AbortError') return; // cancel already handled
+      saveChunkedProgress(file.name, loadChunkedProgress(file.name));
+      activeUploads--;
+      markFailed(row, bar, status, btn, file);
+    }
+  })();
+}
+
+// ── Chunked upload progress persistence (localStorage) ───────────────────────
+const PROGRESS_KEY = 'fb-chunked-uploads';
+
+function loadAllChunkedProgress() {
+  try { return JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}'); }
+  catch { return {}; }
+}
+
+function saveChunkedProgress(fileName, bytesUploaded) {
+  try {
+    const all = loadAllChunkedProgress();
+    all[fileName] = { bytes: bytesUploaded, ts: Date.now(), action: form?.action || '' };
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify(all));
+  } catch { /* localStorage full or unavailable */ }
+}
+
+function loadChunkedProgress(fileName) {
+  const all = loadAllChunkedProgress();
+  const entry = all[fileName];
+  if (!entry) return 0;
+  // Expire entries older than 1 hour (matches server-side .part cleanup)
+  if (Date.now() - entry.ts > 3600000) {
+    removeChunkedProgress(fileName);
+    return 0;
+  }
+  return entry.bytes || 0;
+}
+
+function removeChunkedProgress(fileName) {
+  try {
+    const all = loadAllChunkedProgress();
+    delete all[fileName];
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify(all));
+  } catch { /* ignore */ }
+}
+
+// ── Resume interrupted chunked uploads on page load ──────────────────────────
+(function checkPendingResumes() {
+  if (!form) return;
+  const all = loadAllChunkedProgress();
+  const currentAction = form.action;
+  for (const [fileName, entry] of Object.entries(all)) {
+    if (!entry.bytes || entry.bytes <= 0) { removeChunkedProgress(fileName); continue; }
+    if (Date.now() - entry.ts > 3600000) { removeChunkedProgress(fileName); continue; }
+    if (entry.action && entry.action !== currentAction) continue; // different upload path
+    // Show a resume prompt in the upload queue
+    const row = document.createElement('div');
+    row.className = 'q-row';
+    row.innerHTML =
+      `<span class="q-name" title="${escHtml(fileName)}">${escHtml(fileName)}</span>` +
+      `<span class="q-size">${fmtSize(entry.bytes)} uploaded</span>` +
+      `<div class="q-bar-wrap"><div class="q-bar" style="width:0%;background:#ff9800"></div></div>` +
+      `<span class="q-status q-dim">interrupted</span>` +
+      `<button class="q-btn" title="Resume">↺</button>`;
+    queue.hidden = false;
+    queue.appendChild(row);
+    const resumeBtn = row.querySelector('.q-btn');
+    resumeBtn.addEventListener('click', () => {
+      row.remove();
+      // User must re-select the file (browser security prevents reading files from a previous session)
+      const picker = document.createElement('input');
+      picker.type = 'file';
+      picker.addEventListener('change', () => {
+        if (picker.files.length === 0) return;
+        const f = picker.files[0];
+        if (f.name !== fileName) {
+          alert('Please select the same file: ' + fileName);
+          return;
+        }
+        uploadFileChunked(f);
+      });
+      picker.click();
+    });
+  }
+})();
 
 function markFailed(row, bar, status, btn, file, httpStatus = 0) {
   pendingRetries++;

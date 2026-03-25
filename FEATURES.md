@@ -214,7 +214,7 @@ Checkbox selection on the file listing table with a toolbar for acting on multip
 - Both endpoints require a valid CSRF token
 - README: document new endpoints
 
-### FB-15 · ZIP download from main browse view
+### ✅ FB-15 · ZIP download from main browse view
 
 Extend the existing ZIP download capability (currently upload-area only) to the main browse tree.
 

@@ -103,6 +103,9 @@ public class RouteHandlers
     public Task<IResult> UploadFiles(HttpContext ctx, string? subpath)        => _upload.UploadFiles(ctx, subpath);
     public Task<IResult> UploadToUploadArea(HttpContext ctx, string? subpath) => _upload.UploadToUploadArea(ctx, subpath);
     public Task<IResult> UploadToMyUploads(HttpContext ctx, string? subpath)  => _upload.UploadToMyUploads(ctx, subpath);
+    public IResult UploadStatus(HttpContext ctx, string? subpath)              => _upload.UploadStatus(ctx, subpath);
+    public IResult UploadAreaStatus(HttpContext ctx, string? subpath)          => _upload.UploadAreaStatus(ctx, subpath);
+    public IResult MyUploadsStatus(HttpContext ctx, string? subpath)           => _upload.MyUploadsStatus(ctx, subpath);
     public IResult DiskSpace(HttpContext ctx)                                  => _upload.DiskSpace(ctx);
 
     // ── Modify ─────────────────────────────────────────────────────────────────
