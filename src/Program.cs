@@ -8,7 +8,6 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.RateLimiting;
 using FileBeam;
-using QRCoder;
 using Spectre.Console;
 
 // ── Parse CLI args ─────────────────────────────────────────────────────────────
@@ -497,28 +496,15 @@ var panel = new Panel(
 };
 AnsiConsole.Write(panel);
 
-// ── QR code for quick mobile access ──────────────────────────────────────────
+// ── Auto-login token (used by /auto-login/{token} for QR-scanner webviews) ───
 var scheme  = tlsCertificate != null ? "https" : "http";
 var baseUrl = ips.Count > 0 ? $"{scheme}://{ips[0]}:{port}" : $"{scheme}://localhost:{port}";
 
 AutoLoginStore? autoLoginStore = null;
-string qrUrl = baseUrl;
 if (qrAutologin)
 {
     autoLoginStore = new AutoLoginStore();
-    var autoToken  = autoLoginStore.Generate();
-    qrUrl = $"{baseUrl}/auto-login/{autoToken.Token}";
-}
-
-using var qrGen  = new QRCodeGenerator();
-var qrData       = qrGen.CreateQrCode(qrUrl, QRCodeGenerator.ECCLevel.L);
-var asciiQr      = new AsciiQRCode(qrData);
-AnsiConsole.WriteLine(asciiQr.GetGraphicSmall());
-
-if (qrAutologin && autoLoginStore is not null)
-{
-    var exp = autoLoginStore.GetActive()!.ExpiresAt;
-    AnsiConsole.MarkupLine($"[grey]\u23f1 QR auto-login expires at {exp:HH:mm:ss} UTC (5 min)[/]");
+    autoLoginStore.Generate();
 }
 
 AnsiConsole.MarkupLine("[grey]Press Ctrl+C to stop.[/]\n");
