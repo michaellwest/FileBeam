@@ -58,8 +58,25 @@ public sealed class ChunkedUploadTests : IDisposable
         ctx.Items["fb.user"] = "testuser";
 
         if (contentRange != null)
-            ctx.Request.Headers.ContentRange = contentRange;
+            ctx.Request.Headers["X-Content-Range"] = contentRange;
 
+        return ctx;
+    }
+
+    /// <summary>
+    /// Creates a context using the standard Content-Range header (instead of X-Content-Range).
+    /// </summary>
+    private DefaultHttpContext MakeStreamUploadContextStdRange(byte[] body, string fileName,
+        string contentRange, string role = "rw")
+    {
+        var ctx = MakeContext();
+        ctx.Request.Body          = new MemoryStream(body);
+        ctx.Request.ContentType   = "application/octet-stream";
+        ctx.Request.ContentLength = body.Length;
+        ctx.Request.Headers["X-Upload-Filename"] = fileName;
+        ctx.Request.Headers["Content-Range"] = contentRange;
+        ctx.Items["fb.role"] = role;
+        ctx.Items["fb.user"] = "testuser";
         return ctx;
     }
 
@@ -150,6 +167,41 @@ public sealed class ChunkedUploadTests : IDisposable
         Assert.False(File.Exists(Path.Combine(_uploadDir, "chunked.txt.part")));
         Assert.Equal("AAAABBBB",
             await File.ReadAllTextAsync(Path.Combine(_uploadDir, "chunked.txt")));
+    }
+
+    [Fact]
+    public async Task ChunkedUpload_StandardContentRange_CreatesFile()
+    {
+        var fullData = Encoding.UTF8.GetBytes("XXYY"); // 4 bytes total
+        var chunk1 = fullData[..2];
+        var chunk2 = fullData[2..];
+
+        // Use the standard Content-Range header (not X-Content-Range)
+        var ctx1 = MakeStreamUploadContextStdRange(chunk1, "std-range.txt", "bytes 0-1/4");
+        ctx1.Request.Headers.Accept = "application/json";
+        var result1 = await _handlers.UploadFiles(ctx1, null);
+        Assert.Equal(200, StatusCode(result1));
+
+        var ctx2 = MakeStreamUploadContextStdRange(chunk2, "std-range.txt", "bytes 2-3/4");
+        ctx2.Request.Headers.Accept = "application/json";
+        var result2 = await _handlers.UploadFiles(ctx2, null);
+        Assert.Equal(201, StatusCode(result2));
+
+        Assert.Equal("XXYY",
+            await File.ReadAllTextAsync(Path.Combine(_uploadDir, "std-range.txt")));
+    }
+
+    [Fact]
+    public async Task ChunkedUpload_BareRange_NoBytesPrefix_Works()
+    {
+        // Some clients strip the "bytes " prefix — server should accept bare "0-3/8"
+        var data = Encoding.UTF8.GetBytes("ABCD");
+        var ctx = MakeStreamUploadContext(data, "bare-range.txt", "0-3/4");
+        ctx.Request.Headers.Accept = "application/json";
+
+        var result = await _handlers.UploadFiles(ctx, null);
+        Assert.Equal(201, StatusCode(result));
+        Assert.True(File.Exists(Path.Combine(_uploadDir, "bare-range.txt")));
     }
 
     [Fact]

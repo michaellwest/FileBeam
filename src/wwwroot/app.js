@@ -217,7 +217,7 @@ function uploadFileChunked(file) {
           headers: {
             ...authHeaders(),
             'Content-Type': 'application/octet-stream',
-            'Content-Range': rangeHeader,
+            'X-Content-Range': rangeHeader,
             'X-Upload-Filename': file.name,
             'X-CSRF-Token': csrfToken
           },

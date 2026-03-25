@@ -14,8 +14,11 @@ internal sealed partial class UploadHandlers(HandlerContext ctx)
     /// <summary>Minimum file size (50 MB) before the browser client switches to chunked upload.</summary>
     internal const long ChunkedThreshold = 50L * 1024 * 1024;
 
-    /// <summary>Regex for parsing <c>Content-Range: bytes START-END/TOTAL</c> headers.</summary>
-    [GeneratedRegex(@"^bytes\s+(\d+)-(\d+)/(\d+)$", RegexOptions.IgnoreCase)]
+    /// <summary>
+    /// Regex for parsing Content-Range values. Accepts both <c>bytes START-END/TOTAL</c>
+    /// and bare <c>START-END/TOTAL</c> (some HTTP clients strip the "bytes " prefix).
+    /// </summary>
+    [GeneratedRegex(@"^(?:bytes\s+)?(\d+)-(\d+)/(\d+)$", RegexOptions.IgnoreCase)]
     private static partial Regex ContentRangeRegex();
 
     // Tracks cumulative bytes uploaded per sender key (IP or username).
@@ -262,14 +265,18 @@ internal sealed partial class UploadHandlers(HandlerContext ctx)
         }
         catch { /* DriveInfo can fail for network or virtual paths — skip the check */ }
 
-        // Parse Content-Range header if present
-        var rangeHeader = httpCtx.Request.Headers.ContentRange.ToString();
+        // Parse Content-Range or X-Content-Range header if present.
+        // X-Content-Range is accepted as a fallback because some HTTP clients (e.g. PowerShell)
+        // may normalize or strip the standard Content-Range header.
+        var rangeHeader = httpCtx.Request.Headers["Content-Range"].ToString();
+        if (string.IsNullOrEmpty(rangeHeader))
+            rangeHeader = httpCtx.Request.Headers["X-Content-Range"].ToString();
         long rangeStart = 0, rangeEnd = -1, rangeTotal = -1;
         bool hasRange = false;
 
         if (!string.IsNullOrEmpty(rangeHeader))
         {
-            var m = ContentRangeRegex().Match(rangeHeader);
+            var m = ContentRangeRegex().Match(rangeHeader.Trim());
             if (!m.Success)
                 return Results.BadRequest("Invalid Content-Range header. Expected: bytes START-END/TOTAL");
 
