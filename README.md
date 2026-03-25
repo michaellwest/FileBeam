@@ -385,14 +385,26 @@ curl -X POST http://host/upload/ \
 
 ```powershell
 # PowerShell — simple stream upload
-Invoke-RestMethod "http://host/upload/" -Method POST `
-  -Headers @{ "X-API-Key" = "<invite-id>"; "Content-Type" = "application/octet-stream"; "X-Upload-Filename" = "big-file.iso" } `
-  -InFile "C:\big-file.iso"
+Invoke-RestMethod "http://host/upload/" -Method POST -SkipHeaderValidation `
+  -Headers @{
+    "X-API-Key"         = "<invite-id>"
+    "Content-Type"      = "application/octet-stream"
+    "X-Upload-Filename" = "big-file.iso"
+  } -InFile "C:\big-file.iso"
 
 # Check progress after a failure
 $resp = Invoke-WebRequest "http://host/upload/?file=big-file.iso" `
   -Method HEAD -Headers @{ "X-API-Key" = "<invite-id>" }
 $received = $resp.Headers["X-Bytes-Received"]
+
+# Resume with X-Content-Range (use instead of Content-Range to avoid PS header issues)
+Invoke-RestMethod "http://host/upload/" -Method POST -SkipHeaderValidation `
+  -Headers @{
+    "X-API-Key"         = "<invite-id>"
+    "Content-Type"      = "application/octet-stream"
+    "X-Upload-Filename" = "big-file.iso"
+    "X-Content-Range"   = "bytes 2621440000-5368709119/5368709120"
+  } -Body ([System.IO.File]::ReadAllBytes("C:\big-file.iso")[2621440000..5368709119])
 ```
 
 **Stale cleanup:** incomplete `.part` files are cleaned up by the existing `--upload-ttl` expiry mechanism (if configured). Without `--upload-ttl`, `.part` files remain until manually deleted or the upload is resumed.
