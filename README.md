@@ -672,6 +672,25 @@ dotnet publish src/ -p:PublishProfile=win-x64
 
 Output: `src\bin\Release\net10.0\win-x64\publish\filebeam.exe`
 
+### Release
+
+`release.ps1` builds self-contained binaries for all platforms, generates release notes, and tags the commit:
+
+```powershell
+.\release.ps1 -Version 1.0.0
+```
+
+This will:
+1. Run the full test suite
+2. Publish `filebeam-win-x64.exe`, `filebeam-linux-x64`, and `filebeam-osx-arm64` to a `release/` directory
+3. Generate `release/RELEASE-NOTES.md` with all commits since the last tag
+4. Create and push git tag `v1.0.0`
+
+| Flag          | Description                           |
+| ------------- | ------------------------------------- |
+| `-SkipTests`  | Skip the test suite before building   |
+| `-SkipTag`    | Build without creating a git tag      |
+
 ---
 
 ## Security notes
