@@ -103,10 +103,19 @@ Write-Host "  -> RELEASE-NOTES.md ($($commits.Count) commits)"
 # --- Git tag ---
 if (-not $SkipTag) {
     $tagName = "v$Version"
+    $existingTag = git tag -l $tagName
+    if ($existingTag) {
+        $answer = Read-Host "Tag $tagName already exists. Delete and recreate? (y/N)"
+        if ($answer -ne 'y') {
+            Write-Error "Aborted. Tag $tagName already exists."
+        }
+        git tag -d $tagName
+        git push origin --delete $tagName 2>$null
+    }
     Write-Host "`n--- Creating tag $tagName ---" -ForegroundColor Yellow
     git tag $tagName
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to create tag $tagName. Does it already exist?"
+        Write-Error "Failed to create tag $tagName."
     }
     git push origin $tagName
     if ($LASTEXITCODE -ne 0) {
