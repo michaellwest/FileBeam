@@ -38,9 +38,9 @@ $srcProject = Join-Path $repoRoot 'src'
 $testProject = Join-Path $repoRoot 'tests' 'FileBeam.Tests'
 
 $profiles = @(
-    @{ Name = 'win-x64';    Rid = 'win-x64';    Exe = 'filebeam.exe'; Output = 'filebeam-win-x64.exe' }
-    @{ Name = 'linux-x64';  Rid = 'linux-x64';  Exe = 'filebeam';     Output = 'filebeam-linux-x64' }
-    @{ Name = 'osx-arm64';  Rid = 'osx-arm64';  Exe = 'filebeam';     Output = 'filebeam-osx-arm64' }
+    @{ Name = 'win-x64';    Rid = 'win-x64';    Exe = 'filebeam.exe'; Output = "filebeam-$Version-win-x64.exe" }
+    @{ Name = 'linux-x64';  Rid = 'linux-x64';  Exe = 'filebeam';     Output = "filebeam-$Version-linux-x64" }
+    @{ Name = 'osx-arm64';  Rid = 'osx-arm64';  Exe = 'filebeam';     Output = "filebeam-$Version-osx-arm64" }
 )
 
 Write-Host "`n=== FileBeam Release v$Version ===" -ForegroundColor Cyan

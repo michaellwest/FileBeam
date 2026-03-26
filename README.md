@@ -682,7 +682,7 @@ Output: `src\bin\Release\net10.0\win-x64\publish\filebeam.exe`
 
 This will:
 1. Run the full test suite
-2. Publish `filebeam-win-x64.exe`, `filebeam-linux-x64`, and `filebeam-osx-arm64` to a `release/` directory
+2. Publish `filebeam-{version}-win-x64.exe`, `filebeam-{version}-linux-x64`, and `filebeam-{version}-osx-arm64` to a `release/` directory
 3. Generate `release/RELEASE-NOTES.md` with all commits since the last tag
 4. Create and push git tag `v1.0.0`
 
