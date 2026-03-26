@@ -18,6 +18,27 @@ A dead-simple LAN file server. Run it, share the URL, your colleague downloads (
 - 🔍 Live request log in the console (with elapsed time)
 - 📦 Single `.exe` — no install, no runtime required
 
+## Install
+
+### Scoop (Windows)
+
+```powershell
+scoop bucket add filebeam https://github.com/michaellwest/scoop-filebeam
+scoop install filebeam
+```
+
+After installation, `filebeam` is available on your PATH.
+
+### Manual download
+
+Download the latest binary for your platform from [GitHub Releases](https://github.com/michaellwest/FileBeam/releases). No runtime or installer required — it's a single self-contained executable.
+
+| Platform | File |
+|----------|------|
+| Windows x64 | `filebeam-{version}-win-x64.exe` |
+| Linux x64 | `filebeam-{version}-linux-x64` |
+| macOS ARM | `filebeam-{version}-osx-arm64` |
+
 ## Usage
 
 ### Interactive mode
@@ -683,13 +704,17 @@ Output: `src\bin\Release\net10.0\win-x64\publish\filebeam.exe`
 This will:
 1. Run the full test suite
 2. Publish `filebeam-{version}-win-x64.exe`, `filebeam-{version}-linux-x64`, and `filebeam-{version}-osx-arm64` to a `release/` directory
-3. Generate `release/RELEASE-NOTES.md` with all commits since the last tag
-4. Create and push git tag `v1.0.0`
+3. Generate SHA256 hash files (`.sha256`) for each binary
+4. Generate `release/RELEASE-NOTES.md` with all commits since the last tag
+5. Create and push git tag `v1.0.0`
+6. Create a GitHub release with all binaries, hashes, and release notes attached
+7. Print a ready-to-use Scoop manifest JSON (for updating the [scoop-filebeam](https://github.com/michaellwest/scoop-filebeam) bucket)
 
-| Flag          | Description                           |
-| ------------- | ------------------------------------- |
-| `-SkipTests`  | Skip the test suite before building   |
-| `-SkipTag`    | Build without creating a git tag      |
+| Flag            | Description                                        |
+| --------------- | -------------------------------------------------- |
+| `-SkipTests`    | Skip the test suite before building                |
+| `-SkipTag`      | Build without creating a git tag                   |
+| `-SkipRelease`  | Build locally without creating a GitHub release    |
 
 ---
 

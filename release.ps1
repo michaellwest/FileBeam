@@ -1,11 +1,13 @@
 <#
 .SYNOPSIS
-    Build FileBeam release binaries for all platforms and create a git tag.
+    Build FileBeam release binaries for all platforms, create a GitHub release,
+    and output a Scoop manifest.
 
 .DESCRIPTION
     Runs tests, publishes self-contained binaries for win-x64, linux-x64, and
-    osx-arm64, generates release notes from git history, and creates + pushes
-    a version tag.
+    osx-arm64, generates SHA256 hashes and release notes from git history,
+    creates + pushes a version tag, publishes a GitHub release with all
+    artifacts, and prints a ready-to-use Scoop manifest.
 
 .PARAMETER Version
     Semantic version string (e.g. 1.0.0). Used for the assembly version and
@@ -17,6 +19,9 @@
 .PARAMETER SkipTag
     Skip creating and pushing the git tag.
 
+.PARAMETER SkipRelease
+    Skip creating the GitHub release (local build only).
+
 .EXAMPLE
     .\release.ps1 -Version 1.0.0
 #>
@@ -27,7 +32,9 @@ param(
 
     [switch]$SkipTests,
 
-    [switch]$SkipTag
+    [switch]$SkipTag,
+
+    [switch]$SkipRelease
 )
 
 $ErrorActionPreference = 'Stop'
@@ -73,6 +80,15 @@ foreach ($p in $profiles) {
     Copy-Item $sourcePath $destPath
     $size = (Get-Item $destPath).Length / 1MB
     Write-Host ("  -> {0} ({1:N1} MB)" -f $p.Output, $size) -ForegroundColor Green
+}
+
+# --- SHA256 hashes ---
+Write-Host "`n--- Generating SHA256 hashes ---" -ForegroundColor Yellow
+Get-ChildItem $releaseDir -File | Where-Object { $_.Extension -ne '.md' } | ForEach-Object {
+    $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+    $hashFile = "$($_.FullName).sha256"
+    "$hash  $($_.Name)" | Out-File -FilePath $hashFile -Encoding utf8 -NoNewline
+    Write-Host "  -> $($_.Name).sha256  ($hash)"
 }
 
 # --- Release notes ---
@@ -123,6 +139,58 @@ if (-not $SkipTag) {
     }
     Write-Host "  -> Tag $tagName pushed to origin" -ForegroundColor Green
 }
+
+# --- GitHub release ---
+if (-not $SkipRelease) {
+    $tagName = "v$Version"
+    Write-Host "`n--- Creating GitHub release $tagName ---" -ForegroundColor Yellow
+
+    $assets = Get-ChildItem $releaseDir -File | Where-Object { $_.Name -ne 'RELEASE-NOTES.md' }
+    $assetArgs = ($assets | ForEach-Object { "`"$($_.FullName)`"" }) -join ' '
+
+    $ghCmd = "gh release create `"$tagName`" --title `"FileBeam v$Version`" --notes-file `"$notesPath`" $assetArgs"
+    Write-Host "  Running: gh release create $tagName ($($assets.Count) assets)"
+    Invoke-Expression $ghCmd
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to create GitHub release."
+    }
+    Write-Host "  -> GitHub release $tagName published" -ForegroundColor Green
+} else {
+    Write-Host "`n--- Skipping GitHub release (--SkipRelease) ---" -ForegroundColor DarkGray
+}
+
+# --- Scoop manifest ---
+Write-Host "`n--- Scoop manifest ---" -ForegroundColor Yellow
+$winBinary = "filebeam-$Version-win-x64.exe"
+$winHashFile = Join-Path $releaseDir "$winBinary.sha256"
+if (Test-Path $winHashFile) {
+    $winHash = (Get-Content $winHashFile -Raw).Split(' ')[0].Trim()
+} else {
+    $winHash = "<sha256>"
+}
+
+$repoUrl = (git remote get-url origin) -replace '\.git$', ''
+$manifest = @"
+{
+    "version": "$Version",
+    "description": "LAN file-sharing server. Single self-contained executable.",
+    "homepage": "$repoUrl",
+    "license": "MIT",
+    "url": "$repoUrl/releases/download/v$Version/$winBinary#/filebeam.exe",
+    "hash": "$winHash",
+    "bin": "filebeam.exe",
+    "checkver": "github",
+    "autoupdate": {
+        "url": "$repoUrl/releases/download/v`$version/filebeam-`$version-win-x64.exe#/filebeam.exe",
+        "hash": {
+            "url": "$repoUrl/releases/download/v`$version/filebeam-`$version-win-x64.exe.sha256"
+        }
+    }
+}
+"@
+
+Write-Host $manifest
+Write-Host "`n  Copy the above JSON to your scoop-filebeam bucket repo as 'bucket/filebeam.json'" -ForegroundColor DarkGray
 
 # --- Summary ---
 Write-Host "`n=== Release v$Version complete ===" -ForegroundColor Cyan
